@@ -3,3 +3,4 @@ data/
 *.pem
 .env
 *_original.txt
+*.log
