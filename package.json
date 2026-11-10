@@ -1,0 +1,51 @@
+{
+  "name": "kalshibot",
+  "version": "3.1.0",
+  "description": "High-frequency arbitrage bot for Kalshi BTC contracts with Binance WebSocket, Polymarket signals, RedStone oracle, and Mission Control UI",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "legacy": "node kalshi-bot.js",
+    "dev": "node server.js",
+    "backtest": "node backtest/backtest.js",
+    "test": "node --test tests/*.test.js",
+    "backtest:verbose": "node backtest/backtest.js --verbose",
+    "backtest:30d": "node backtest/backtest.js --days 30",
+    "capture:markets": "node scripts/capture-kalshi-history.js",
+    "capture:replay": "node scripts/replay-kalshi-capture.js",
+    "capture:simulate": "node scripts/simulate-kalshi-capture.js",
+    "historical:ml": "node scripts/build-historical-ml-dataset.js",
+    "baymax:oos": "node scripts/baymax-oos.js",
+    "baymax:5k": "node -r dotenv/config scripts/baymax-5k.js",
+    "specialists:5k": "node -r dotenv/config scripts/specialists-5k.js",
+    "baymax:residual": "node -r dotenv/config scripts/baymax-residual.js",
+    "final:precision-oos": "node -r dotenv/config scripts/final-precision-oos.js",
+    "settlement:shadow-eval": "node -r dotenv/config scripts/settlement-shadow-eval.js"
+  },
+  "keywords": [
+    "kalshi",
+    "trading",
+    "bot",
+    "prediction-markets",
+    "bitcoin",
+    "arbitrage",
+    "binance",
+    "polymarket",
+    "redstone"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.99.3",
+    "axios": "^1.6.0",
+    "better-sqlite3": "^12.6.2",
+    "dotenv": "^16.3.1",
+    "express": "^4.21.0",
+    "socket.io": "^4.7.5",
+    "ws": "^8.18.0"
+  },
+  "optionalDependencies": {
+    "@langchain/openai": "^0.3.0",
+    "langchain": "^0.3.0"
+  }
+}
