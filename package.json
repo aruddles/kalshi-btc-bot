@@ -13,6 +13,7 @@
     "capture:markets": "node scripts/capture-kalshi-history.js",
     "capture:replay": "node scripts/replay-kalshi-capture.js",
     "capture:simulate": "node scripts/simulate-kalshi-capture.js",
+    "lag:study": "node scripts/lag-study.js",
     "historical:ml": "node scripts/build-historical-ml-dataset.js",
     "historical:score": "node scripts/score-historical.js",
     "historical:retrain": "node scripts/retrain-historical.js",

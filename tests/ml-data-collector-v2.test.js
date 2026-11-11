@@ -20,6 +20,8 @@ test('collector writes stable unlabeled market snapshots without requiring a tra
   const c = new MLDataCollector();
   c.context = { registry: { get: name => name === 'state-manager' ? { botState: state } : null } };
   c.cadenceMs = 5000;
+  // Both snapshots must fall in one 5s bucket; avoid starting right before a boundary.
+  while (Date.now() % 5000 > 3500) await new Promise(r => setTimeout(r, 50));
   await c._collect();
   await c._collect();
 

@@ -13,12 +13,14 @@ const STALL_MS = 30000;            // reconnect a venue that has gone quiet
 const MAX_RECONNECT_MS = 30000;
 
 class UsdReferenceFeed {
-  constructor({ venues = VENUES, WebSocketImpl = WebSocket, now = () => Date.now(), sampleMs = SAMPLE_MS, logger = console } = {}) {
+  // onQuote(venue, { bid, ask, mid }, ts) is called for every parsed top-of-book update (used by the capture).
+  constructor({ venues = VENUES, WebSocketImpl = WebSocket, now = () => Date.now(), sampleMs = SAMPLE_MS, logger = console, onQuote = null } = {}) {
     this.venues = venues.filter(v => ENDPOINTS[v] && parsers[v]);
     this.WebSocketImpl = WebSocketImpl;
     this.now = now;
     this.sampleMs = sampleMs;
     this.logger = logger;
+    this.onQuote = onQuote;
     this.running = false;
     this.quotes = {};              // venue -> { bid, ask, mid, ts }
     this.conn = {};                // venue -> { ws, connected, delay, timer, lastMessageAt, messages }
@@ -56,7 +58,11 @@ class UsdReferenceFeed {
     if (c) { c.lastMessageAt = this.now(); c.messages++; }
     if (venue === 'bitstamp' && msg?.event === 'bts:request_reconnect') { this._reconnect(venue); return; }
     const q = parsers[venue]?.(msg);
-    if (q) this.quotes[venue] = { ...q, ts: this.now() };
+    if (q) {
+      const ts = this.now();
+      this.quotes[venue] = { ...q, ts };
+      try { this.onQuote?.(venue, q, ts); } catch (_) { /* observer errors never break the feed */ }
+    }
   }
 
   // Take one composite sample into priceHistory. Returns the sample or null.
