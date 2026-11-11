@@ -164,3 +164,9 @@ CREATE INDEX IF NOT EXISTS idx_ml_hist_staging_quality ON ml_historical_staging(
 -- v3.1: live collector provenance + shadow settlement-model probability.
 -- Rows without collector_meta predate v3.1 (FINAL-regime volatility/trend were stale).
 ALTER TABLE ml_features ADD COLUMN IF NOT EXISTS collector_meta JSONB;
+
+-- v3.4: partial index for the settlement shadow evaluation (getSettlementShadowRows keyset-pages
+-- on id over settled, collector_meta-tagged snapshots). Optional; speeds the read as the table grows.
+CREATE INDEX IF NOT EXISTS idx_ml_features_shadow_rows
+  ON ml_features(id)
+  WHERE signal_type = 'MARKET_SNAPSHOT_YES' AND label IS NOT NULL AND collector_meta IS NOT NULL;

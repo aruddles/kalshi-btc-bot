@@ -8,6 +8,7 @@
  * Capabilities: score-signal, train-model, get-ml-status
  */
 
+const { feedsFrom, marketPriceInputs } = require('../../../lib/market-prices');
 const BaseSkill = require('../../core/base-skill');
 const mlPipeline = require('../../../lib/ml-pipeline');
 const supabase = require('../../../lib/supabase');
@@ -97,9 +98,11 @@ class MLSignalScorer extends BaseSkill {
     const trend = state.model || {};
     const stats = state.stats || {};
 
+    // Same-feed opening/current price pair (lib/market-prices); legacy Binance fallback.
+    const px = market ? marketPriceInputs(market, state, feedsFrom(this.context?.registry)) : null;
     return {
-      btcPrice: state.btcPrice.binance || 0,
-      openPrice: state.marketOpenPrices[signal.ticker] || 0,
+      btcPrice: px ? px.currentPrice : (state.btcPrice.binance || 0),
+      openPrice: px ? px.openPrice : (state.marketOpenPrices[signal.ticker] || 0),
       timeRemainingMs: market ? market.closeTime - Date.now() : 0,
       totalDurationMs: 900000,
       sigma: trend.volatility || 0.0015,

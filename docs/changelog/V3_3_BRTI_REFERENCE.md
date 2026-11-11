@@ -17,3 +17,8 @@ KXBTC15M settles on CF Benchmarks' BRTI: YES iff the 60-second BRTI average befo
 Shadow only. Before enabling `settlement_brti`:
 1. `strikeAccuracy` over ≥100 markets should show the composite much closer to `floor_strike` than Binance.
 2. The secondary shadow evaluation should show BRTI_PROXY beating KALSHI_MID on ≥200 settled markets.
+
+## Follow-up fixes (2026-11-11)
+- `getSettlementShadowRows` paged with OFFSET while ordering by the unindexed `ts`, which hit Supabase's statement timeout. It now keyset-pages on `id`, retries a page on a timeout, and sorts the result in memory. An optional partial index is in `lib/supabase-migrations.sql` (`idx_ml_features_shadow_rows`).
+- BRTI_PROXY rows were only scored when GBM and SETTLEMENT were also present. Those models need a Binance tick within 2.5s of market open, which is often missing (see below), so BRTI rows are now scored on their own. They are compared with KALSHI_MID on all rows, and with GBM where it exists. The primary comparison is unchanged.
+- **Observed:** Binance.US `btcusdt@bookTicker` produced 7 ticks in 45s, with gaps up to 26s. Of the 125 live markets collected since v3.1, 51 had no Binance open price. Those markets had no GBM probability and were skipped for trading. Only 8 markets had the settlement model's 30 pre-open ticks.

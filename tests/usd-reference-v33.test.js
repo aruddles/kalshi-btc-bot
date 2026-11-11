@@ -169,3 +169,19 @@ test('shadow eval scores BRTI_PROXY on rows that have it without changing the st
   assert.equal(r.status, 'INSUFFICIENT_DATA');
   assert.deepEqual(E.MODELS, ['KALSHI_MID', 'GBM_POINT', 'SETTLEMENT']);
 });
+
+test('BRTI rows count even when the Binance-based models are missing', () => {
+  const rows = [];
+  for (let i = 0; i < 10; i++) {
+    const y = i % 2;
+    rows.push({ ticker: `B${i}`, ts: new Date(i * 1000).toISOString(), label: y, collector_meta: {
+      collector_version: 'live-collector-v3.1', kalshi_yes_bid: 0.45, kalshi_yes_ask: 0.47, time_remaining_s: 200,
+      gbm_p: null, settlement_p: null, brti_p: y ? 0.9 : 0.1 } });
+  }
+  const r = E.evaluate(rows);
+  assert.equal(r.markets, 0, 'primary comparison still requires GBM and SETTLEMENT');
+  assert.equal(r.rejected.missing_model_p, 10);
+  assert.equal(r.brtiProxy.markets, 10);
+  assert.equal(r.brtiProxy.withGbm.markets, 0);
+  assert.equal(r.brtiProxy.ready, false);
+});

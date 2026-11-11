@@ -8,6 +8,7 @@
  *               reconcile-positions, place-order, get-order, cancel-order, sell-position
  */
 
+const { feedsFrom, recordOpenPrice } = require('../../../lib/market-prices');
 const BaseSkill = require('../../core/base-skill');
 const KalshiClient = require('../../../bot/kalshi');
 
@@ -122,14 +123,8 @@ class KalshiMarketData extends BaseSkill {
         if (closeTime <= now) continue;
 
         const ticker = m.ticker;
-        if (!state.marketOpenPrices[ticker]) {
-          const reference = this.binanceFeed?.getPriceAt(m.openTime, 2500);
-          if (reference) {
-            state.marketOpenPrices[ticker] = reference.price;
-            state.marketOpenPriceMeta ||= {};
-            state.marketOpenPriceMeta[ticker] = { source: 'binance_at_market_open', timestamp: reference.timestamp };
-          }
-        }
+        // Opening price from the composite USD feed, else Binance (lib/market-prices).
+        recordOpenPrice(state, m, { reference: feedsFrom(this.context.registry).reference, binance: this.binanceFeed });
 
         processed.push({
           ...m,
