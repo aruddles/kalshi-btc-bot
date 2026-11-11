@@ -529,7 +529,7 @@ npm test
 |------|----------|
 | `server.js` | Entry point: Express + Socket.io dashboard server, starts the MasterAgent |
 | `agents/` | Agent framework and skills (market data, analysis, trading, infrastructure) |
-| `bot/` | Feed and exchange clients wrapped by the skills (Binance, Kalshi, Polymarket, RedStone, state, analytics DB) |
+| `bot/` | Feed and exchange clients wrapped by the skills (Binance, composite USD/BRTI proxy, Kalshi, Polymarket, RedStone, state, analytics DB) |
 | `lib/` | Pure model/economics code: normal CDF, volatility, settlement model, fees, ML pipeline and research labs |
 | `scripts/` | Research and data-capture CLIs (`npm run …`) |
 | `api/` | Vercel serverless endpoints |

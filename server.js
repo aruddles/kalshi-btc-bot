@@ -63,6 +63,12 @@ const config = {
   POLYMARKET_CLOB_API: 'https://clob.polymarket.com',
 
   SERIES_TICKER: process.env.SERIES_TICKER || 'KXBTC15M',
+
+  // Probability model that drives trading: gbm_point (default) | settlement_avg | settlement_brti.
+  // The other models are always computed and logged in shadow.
+  PROB_MODEL: ['gbm_point', 'settlement_avg', 'settlement_brti'].includes(process.env.PROB_MODEL) ? process.env.PROB_MODEL : 'gbm_point',
+  // Composite Coinbase/Kraken/Bitstamp BTC/USD feed (BRTI proxy). Market data only.
+  USD_REFERENCE_ENABLED: process.env.USD_REFERENCE_ENABLED !== 'false',
   SLOT_DURATION: parseInt(process.env.SLOT_DURATION) || 900, // 15 min
 
   // Strategy thresholds
@@ -175,9 +181,13 @@ function persistMode(mode) {
 // chart's YES CHANCE view has data for 5M/15M/1H as soon as a browser connects.
 const CHART_HISTORY_MS = 60 * 60 * 1000;
 const chanceHistory = [];
+function referenceSkill() { return agent.registry.get('usd-reference-feed'); }
 setInterval(() => {
-  const m = agent.state?.activeMarkets?.[0];
   const now = Date.now();
+  // Stream the composite USD (BRTI-proxy) price to dashboards once a second.
+  const ref = referenceSkill()?.getFeed?.();
+  if (ref?.isHealthy?.()) io.emit('price:reference', { price: ref.latest.price, ts: ref.latest.timestamp, venues: ref.latest.venues });
+  const m = agent.state?.activeMarkets?.[0];
   while (chanceHistory.length && now - chanceHistory[0].t > CHART_HISTORY_MS) chanceHistory.shift();
   if (!agent.running || !m?.ticker || (m.refreshedAt && now - m.refreshedAt > 15000)) return;
   const bid = Number(m.yesBid), ask = Number(m.yesAsk);
@@ -193,7 +203,9 @@ function dashboardBootstrap() {
     const cutoff = Date.now() - CHART_HISTORY_MS;
     if (Array.isArray(feed?.priceHistory)) priceHistory = feed.priceHistory.filter(x => x.timestamp >= cutoff).map(x => ({ t: x.timestamp, p: x.price }));
   } catch (_) { /* skill may still be warming */ }
-  return { snapshot, priceHistory, chanceHistory: chanceHistory.slice(), ts: Date.now() };
+  const refFeed = referenceSkill()?.getFeed?.();
+  const referenceHistory = (refFeed?.priceHistory || []).filter(x => x.timestamp >= Date.now() - CHART_HISTORY_MS).map(x => ({ t: x.timestamp, p: x.price }));
+  return { snapshot, priceHistory, referenceHistory, chanceHistory: chanceHistory.slice(), ts: Date.now() };
 }
 
 // Health check
@@ -314,6 +326,8 @@ app.get('/api/ml-challengers', (req, res) => { const p=require('./lib/ml-pipelin
 app.get('/api/ml-paper', (req, res) => { res.json(agent.getMlPaperSnapshot?.() || { enabled:false,status:'OFF',simulated:true }); });
 app.get('/api/model-arena', (req,res)=>{ res.json(agent.getModelArenaSnapshot?.() || {enabled:false,status:'OFF',simulated:true,bots:{}}); });
 app.get('/api/final-selectivity', (req,res)=>{ res.json(agent.getFinalSelectivitySnapshot?.() || {status:'OFF',simulated:true,modelIdentity:'FINAL_CHALLENGER_1K',policies:{}}); });
+// Composite BTC/USD (BRTI proxy): venue health, basis correction and strike accuracy vs Binance.
+app.get('/api/reference', (req, res) => res.json(referenceSkill()?.getStatus?.() || { healthy: false, running: false }));
 app.get('/api/baymax-5k-forward', (req,res)=>{ res.json(agent.getBaymax5kForwardSnapshot?.() || {status:'OFF',simulated:true,liveOrderCapable:false,modelIdentity:'BAYMAX_FINAL_5K',policies:{}}); });
 
 // API: get agent skill registry status

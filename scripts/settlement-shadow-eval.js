@@ -20,6 +20,12 @@ const E = require('../lib/settlement-shadow-eval');
     const ci = r.all.brierDiff?.SETTLEMENT_minus_GBM;
     if (ci) console.log(`SETTLEMENT - GBM Brier 95% CI: [${ci.low.toFixed(5)}, ${ci.high.toFixed(5)}]`);
     if (r.strikeBasisUsd) console.log(`Strike basis (Binance pre-open avg - floor_strike): median $${r.strikeBasisUsd.median.toFixed(2)}, p05..p95 $${r.strikeBasisUsd.p05.toFixed(2)}..$${r.strikeBasisUsd.p95.toFixed(2)}`);
+    const b = r.brtiProxy;
+    if (b && b.observations) {
+      console.log(`\nSECONDARY (v3.3) BRTI_PROXY on ${b.markets} markets with brti_p: Brier ${f(b.BRTI_PROXY.brier)} vs KALSHI_MID ${f(b.KALSHI_MID.brier)} vs GBM ${f(b.GBM_POINT.brier)}`);
+      const k = b.brierDiff?.BRTI_minus_KALSHI;
+      if (k) console.log(`BRTI_PROXY - KALSHI Brier 95% CI: [${k.low.toFixed(5)}, ${k.high.toFixed(5)}]`);
+    }
     console.log(`STATUS: ${r.status}`);
   } catch (e) { console.error(`[SETTLEMENT-SHADOW-EVAL] ${e.message}`); process.exitCode = 1; }
 })();

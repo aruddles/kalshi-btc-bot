@@ -153,11 +153,15 @@ class SignalGenerator extends BaseSkill {
 
       // Calculate model probability
       const legacyProb = probModel.calculateImpliedProbability(btcPrice, openPrice, timeRemaining, totalDuration, binanceFeed);
-      // Settlement-aware model is always computed (shadow); it drives trading only when PROB_MODEL=settlement_avg.
+      // Settlement-aware models are always computed (shadow). One drives trading only when
+      // PROB_MODEL=settlement_avg (Binance strike proxy) or settlement_brti (Kalshi
+      // floor_strike + composite USD feed); if it is unavailable the market is skipped.
       const settle = probModel.calculateSettlementProbability?.(market, btcPrice, binanceFeed, now) || null;
-      const useSettlement = String(this.context.config.PROB_MODEL || 'gbm_point') === 'settlement_avg';
-      if (useSettlement && !settle) continue;
-      const prob = useSettlement ? { ...legacyProb, probUp: settle.probUp, probDown: settle.probDown } : legacyProb;
+      const brti = probModel.calculateReferenceSettlementProbability?.(market, now) || null;
+      const probModelName = String(this.context.config.PROB_MODEL || 'gbm_point');
+      const chosen = probModelName === 'settlement_avg' ? settle : probModelName === 'settlement_brti' ? brti : null;
+      if (['settlement_avg', 'settlement_brti'].includes(probModelName) && !chosen) continue;
+      const prob = chosen ? { ...legacyProb, probUp: chosen.probUp, probDown: chosen.probDown } : legacyProb;
 
       // Get trend data
       const trendData = trendSkill.getIndicator() ? trendSkill.getIndicator().getTrend() : {};
@@ -191,9 +195,12 @@ class SignalGenerator extends BaseSkill {
       state.updateModel({
         impliedProbUp: prob.probUp,
         impliedProbDown: prob.probDown,
-        probModel: useSettlement ? 'settlement_avg' : 'gbm_point',
+        probModel: chosen ? probModelName : 'gbm_point',
         gbmProbUp: legacyProb.probUp,
         settlementProbUp: settle ? settle.probUp : null,
+        brtiProbUp: brti ? brti.probUp : null,
+        referencePrice: brti ? brti.referencePrice : null,
+        floorStrike: Number.isFinite(market.floorStrike) ? market.floorStrike : null,
         strikeBasis: settle ? settle.basis : null,
         spotMove: prob.move,
         spotMovePct: prob.movePct,

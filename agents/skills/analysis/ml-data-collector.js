@@ -90,8 +90,9 @@ class MLDataCollector extends BaseSkill {
       gbmProb = probModel.calculateImpliedProbability(btcPrice, openPrice, Math.max(0, market.closeTime - now), durationMs, feed).probUp;
     }
     const settle = feed && btcPrice > 0 ? settlementProbabilityForMarket({ market, currentPrice: btcPrice, now, feed }) : null;
+    const brti = probModel?.calculateReferenceSettlementProbability?.(market, now) || null;
     return {
-      live, sigma, gbmProb, settle,
+      live, sigma, gbmProb, settle, brti,
       trend: trendData ? (trendData.trend || 'NEUTRAL') : (model.trend || 'NEUTRAL'),
       trendStrength: trendData ? (trendData.strength || 0) : (model.trendStrength || 0),
       trendROC: trendData ? (trendData.roc || 0) : (model.trendROC || 0),
@@ -165,6 +166,9 @@ class MLDataCollector extends BaseSkill {
           settlement_strike: live.settle ? live.settle.strike : null,
           floor_strike: Number.isFinite(market.floorStrike) ? market.floorStrike : null,
           strike_basis: live.settle ? live.settle.basis : null,
+          brti_p: live.brti ? live.brti.probUp : null,
+          reference_price: live.brti ? live.brti.referencePrice : null,
+          reference_bias: live.brti ? live.brti.bias : null,
           final_window_samples: live.settle ? live.settle.observedSamples : null,
           kalshi_yes_ask: market.yesAsk ?? null,
           kalshi_yes_bid: market.yesBid ?? null,

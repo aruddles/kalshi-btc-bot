@@ -27,6 +27,7 @@ const BinancePriceFeed = require('../skills/market-data/binance-price-feed');
 const PolymarketPriceFeed = require('../skills/market-data/polymarket-price-feed');
 const RedstonePriceFeed = require('../skills/market-data/redstone-price-feed');
 const KalshiMarketData = require('../skills/market-data/kalshi-market-data');
+const UsdReferenceFeed = require('../skills/market-data/usd-reference-feed');
 
 // Analysis Skills
 const ProbabilityModel = require('../skills/analysis/probability-model');
@@ -86,6 +87,7 @@ class MasterAgent extends EventEmitter {
     this.registry.register(new PolymarketPriceFeed());
     this.registry.register(new RedstonePriceFeed());
     this.registry.register(new KalshiMarketData());
+    this.registry.register(new UsdReferenceFeed());
 
     // Analysis (depends on market data skills)
     this.registry.register(new TrendAnalysis());
@@ -118,6 +120,9 @@ class MasterAgent extends EventEmitter {
     o.route('get-polymarket-price', 'polymarket-price-feed');
 
     o.route('get-redstone-price', 'redstone-price-feed');
+
+    o.route('get-reference-price', 'usd-reference-feed');
+    o.route('get-reference-status', 'usd-reference-feed');
 
     o.route('calculate-probability', 'probability-model');
     o.route('get-trend', 'trend-analysis');
