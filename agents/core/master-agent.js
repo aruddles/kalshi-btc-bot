@@ -405,7 +405,7 @@ class MasterAgent extends EventEmitter {
             this.log(`Executed: ${exec.signal} → order ${exec.orderId}`, 'SUCCESS');
           } else if (exec.status === 'no_fill') {
             this.log(`No fill: ${exec.signal} → IOC order ${exec.orderId}`, 'WARN');
-          } else if (exec.status === 'blocked') {
+          } else if (exec.status === 'blocked' && !exec.quiet) {
             this.log(`Blocked: ${exec.signal} (${exec.reason})`, 'WARN');
           } else if (exec.status === 'error') {
             this.log(`Execution error: ${exec.signal} — ${exec.error}`, 'ERROR');
