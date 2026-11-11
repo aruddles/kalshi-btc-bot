@@ -14,6 +14,8 @@
     "capture:replay": "node scripts/replay-kalshi-capture.js",
     "capture:simulate": "node scripts/simulate-kalshi-capture.js",
     "historical:ml": "node scripts/build-historical-ml-dataset.js",
+    "historical:score": "node scripts/score-historical.js",
+    "historical:retrain": "node scripts/retrain-historical.js",
     "baymax:oos": "node scripts/baymax-oos.js",
     "baymax:5k": "node -r dotenv/config scripts/baymax-5k.js",
     "specialists:5k": "node -r dotenv/config scripts/specialists-5k.js",
