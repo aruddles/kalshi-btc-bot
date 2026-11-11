@@ -1,12 +1,11 @@
 {
   "name": "kalshibot",
-  "version": "3.1.0",
-  "description": "High-frequency arbitrage bot for Kalshi BTC contracts with Binance WebSocket, Polymarket signals, RedStone oracle, and Mission Control UI",
+  "version": "3.2.0",
+  "description": "Kalshi KXBTC15M (15-minute BTC) trading bot with Binance/Polymarket/RedStone feeds, risk guards, paper modes, and a Mission Control dashboard",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "legacy": "node kalshi-bot.js",
-    "dev": "node server.js",
+    "start": "node -r dotenv/config server.js",
+    "dev": "node -r dotenv/config server.js",
     "backtest": "node backtest/backtest.js",
     "test": "node --test tests/*.test.js",
     "backtest:verbose": "node backtest/backtest.js --verbose",
@@ -43,9 +42,5 @@
     "express": "^4.21.0",
     "socket.io": "^4.7.5",
     "ws": "^8.18.0"
-  },
-  "optionalDependencies": {
-    "@langchain/openai": "^0.3.0",
-    "langchain": "^0.3.0"
   }
 }

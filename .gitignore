@@ -1,37 +1,3 @@
-node_modules/
-data/
-*.pem
-.env
-*_original.txt
-
-# Historical builder runtime artifacts
-data/.historical-ml-checkpoint.json
-data/.historical-ml-checkpoint.json.tmp-*
-data/historical-ml-dry-run.jsonl
-data/challenger-shadow-state.json
-data/historical-ml-v1-1000-markets.jsonl
-# BAYMAX runtime model/results (v2.8.3)
-data/final-challenger-1k-model.json
-data/baymax/
-data/baymax-oos-*.jsonl
-
-data/models/baymax-final-5k.json
-data/baymax-5k/
-data/baymax-5k-forward-state.json
-data/models/baymax-final-5k.json
-data/baymax-5k/
-data/models/baymax-residual-v1.json
-data/residual/
-
-# Local secrets / runtime state
-.env
-*.pem
-node_modules/
-.venv/
-data/
-*.log
-.DS_Store
-
 # Secrets
 .env
 *.pem
@@ -41,9 +7,10 @@ data/
 node_modules/
 .venv/
 
-# Runtime/research data
+# Runtime state, research datasets and trained models
 data/
-*.log
 
-# macOS
+# Logs / OS
+*.log
 .DS_Store
+*_original.txt

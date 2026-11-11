@@ -10,7 +10,6 @@
  * Architecture:
  *   server.js → MasterAgent → Orchestrator → Skills
  *
- * The legacy BotEngine is preserved at `node kalshi-bot.js` for fallback.
  */
 
 require('dotenv').config();

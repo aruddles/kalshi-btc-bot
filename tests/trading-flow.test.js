@@ -16,7 +16,6 @@ const RiskManager = require('../agents/skills/trading/risk-manager');
 const SignalGenerator = require('../agents/skills/analysis/signal-generator');
 const PositionManager = require('../agents/skills/trading/position-manager');
 const OrderExecutor = require('../agents/skills/trading/order-executor');
-const Strategy = require('../bot/strategy');
 Module._load = originalLoad;
 
 const { TradingGuard } = require('../lib/trading-guard');
@@ -368,23 +367,6 @@ test('executor: the order sent is an immediate-or-cancel limit in dollar strings
   assert.equal(sent.time_in_force, 'immediate_or_cancel');
   assert.equal(sent.no_price_dollars, '0.5200');
   assert.ok(!('no_price' in sent) && !('yes_price' in sent));
-});
-
-// ---------- Legacy strategy fixes ----------
-test('REGRESSION (legacy strategy): sizing of zero contracts does not force a 1-contract trade', () => {
-  const state = new FakeState();
-  state.balance = { total: 0.3, available: 0.3, reserved: 0 };
-  state.marketOpenPrices = { T: 100000 };
-  state.marketOpenPriceMeta = { T: { source: 'binance_at_market_open', timestamp: Date.now() - 60000 } };
-  state.btcPrice.binance = 100500; // big up move => model very sure of UP
-  state.updateModel = () => {};
-  const feed = { getRecentVolatility: () => 0.001 };
-  const st = new Strategy(state, { MIN_DIVERGENCE: 1, KELLY_FRACTION: 0.25, MAX_POSITION_SIZE: 5, MIN_CONTRACT_PRICE: 35, MAX_CONTRACT_PRICE: 65, TREND_ENABLED: false }, feed);
-  const now = Date.now();
-  const market = { ticker: 'T', openTime: now - 60000, closeTime: now + 840000, yesAsk: 0.5, noAsk: 0.5, yesAskCents: 50, noAskCents: 50 };
-  const signals = st.generateSignals([market], null);
-  assert.ok(signals.every(s => s.contracts >= 1));
-  assert.equal(signals.length, 0, '$0.30 cannot afford a 50c contract plus fee');
 });
 
 test('LIVE REPRICE: executor uses the fresh executable ask instead of stale signal price', async () => {

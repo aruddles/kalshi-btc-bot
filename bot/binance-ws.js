@@ -1,5 +1,6 @@
 const WebSocket = require('ws');
 const axios = require('axios');
+const { estimateVolatility } = require('../lib/volatility');
 
 class BinanceFeed {
   constructor(state, symbol = 'btcusdt') {
@@ -192,28 +193,9 @@ class BinanceFeed {
     return { price: nearest.price, timestamp: nearest.timestamp };
   }
 
-  // Estimate realized volatility from recent price history
+  // Realized volatility over `windowSeconds` (see lib/volatility.js).
   getRecentVolatility(windowSeconds = 300) {
-    const cutoff = Date.now() - windowSeconds * 1000;
-    const relevant = this.priceHistory.filter(p => p.timestamp >= cutoff);
-    if (relevant.length < 10) return 0.0015; // default ~0.15% for 5-min
-
-    // Calculate log returns
-    const returns = [];
-    for (let i = 1; i < relevant.length; i++) {
-      returns.push(Math.log(relevant[i].price / relevant[i - 1].price));
-    }
-
-    // Standard deviation of returns
-    const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
-    const variance = returns.reduce((a, r) => a + (r - mean) ** 2, 0) / returns.length;
-    const stdPerSample = Math.sqrt(variance);
-
-    // Scale to the window
-    const avgInterval = (relevant[relevant.length - 1].timestamp - relevant[0].timestamp) / (relevant.length - 1);
-    const samplesInWindow = (windowSeconds * 1000) / avgInterval;
-
-    return stdPerSample * Math.sqrt(samplesInWindow);
+    return estimateVolatility(this.priceHistory, windowSeconds);
   }
 
   stop() {
