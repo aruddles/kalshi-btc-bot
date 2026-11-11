@@ -171,14 +171,29 @@ function persistMode(mode) {
   try { fs.writeFileSync(RUNTIME_MODE_FILE, JSON.stringify({ mode }, null, 2)); } catch (e) { console.warn('[Server] Could not persist runtime mode:', e.message); }
 }
 
+// Rolling 1-hour history of the front market's YES midpoint (percent), so the dashboard
+// chart's YES CHANCE view has data for 5M/15M/1H as soon as a browser connects.
+const CHART_HISTORY_MS = 60 * 60 * 1000;
+const chanceHistory = [];
+setInterval(() => {
+  const m = agent.state?.activeMarkets?.[0];
+  const now = Date.now();
+  while (chanceHistory.length && now - chanceHistory[0].t > CHART_HISTORY_MS) chanceHistory.shift();
+  if (!agent.running || !m?.ticker || (m.refreshedAt && now - m.refreshedAt > 15000)) return;
+  const bid = Number(m.yesBid), ask = Number(m.yesAsk);
+  if (!(bid > 0 && ask > 0 && bid < 1 && ask < 1 && ask >= bid)) return;
+  chanceHistory.push({ t: now, ticker: m.ticker, v: Math.round((bid + ask) * 5000) / 100 });
+}, 1000).unref();
+
 function dashboardBootstrap() {
   const snapshot = agent.state?.getSnapshot?.() || null;
   let priceHistory = [];
   try {
     const feed = agent.registry.get('binance-price-feed')?.getFeed?.();
-    if (Array.isArray(feed?.priceHistory)) priceHistory = feed.priceHistory.slice(-240);
+    const cutoff = Date.now() - CHART_HISTORY_MS;
+    if (Array.isArray(feed?.priceHistory)) priceHistory = feed.priceHistory.filter(x => x.timestamp >= cutoff).map(x => ({ t: x.timestamp, p: x.price }));
   } catch (_) { /* skill may still be warming */ }
-  return { snapshot, priceHistory, ts: Date.now() };
+  return { snapshot, priceHistory, chanceHistory: chanceHistory.slice(), ts: Date.now() };
 }
 
 // Health check
