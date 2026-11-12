@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node -r dotenv/config server.js",
+    "path-feature-test": "node scripts/path-feature-test.js",
     "exit-vs-hold": "node scripts/exit-vs-hold.js",
     "forever": "bash -c 'while true; do node -r dotenv/config server.js; echo \"[forever] server exited; restarting in 3s (Ctrl-C to quit)\"; sleep 3; done'",
     "dev": "node -r dotenv/config server.js",

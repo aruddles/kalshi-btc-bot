@@ -11,6 +11,7 @@ const BaseSkill = require('../../core/base-skill');
 const mlPipeline = require('../../../lib/ml-pipeline');
 const supabase = require('../../../lib/supabase');
 const { settlementProbabilityForMarket } = require('../../../lib/settlement-model');
+const { CfIndexPoller } = require('../../../lib/cf-index');
 const { feedsFrom, marketPriceInputs } = require('../../../lib/market-prices');
 
 // v3.1: volatility/trend/model_prob are computed per market at snapshot time.
@@ -44,6 +45,13 @@ class MLDataCollector extends BaseSkill {
     if (!supabase.enabled) {
       console.log('[MLCollector] Supabase disabled; collector idle');
       return;
+    }
+    // Official CF Benchmarks BRTI (shadow): logged beside each snapshot.
+    if (String(this.context?.config?.CF_INDEX_ENABLED ?? process.env.CF_INDEX_ENABLED ?? 'true') !== 'false') {
+      try {
+        const client = this.context.registry.get('kalshi-market-data')?.getClient?.();
+        if (client) { this.cfIndex = new CfIndexPoller({ client }); this.cfIndex.start(); }
+      } catch (err) { console.warn('[MLCollector] CF index feed not started:', err.message); }
     }
     await this._recoverPendingTickers();
     this.interval = setInterval(() => this._tick().catch(err => {
@@ -172,6 +180,7 @@ class MLDataCollector extends BaseSkill {
           brti_p: live.brti ? live.brti.probUp : null,
           reference_price: live.brti ? live.brti.referencePrice : null,
           reference_bias: live.brti ? live.brti.bias : null,
+          ...this._cfMeta(now),
           final_window_samples: live.settle ? live.settle.observedSamples : null,
           kalshi_yes_ask: market.yesAsk ?? null,
           kalshi_yes_bid: market.yesBid ?? null,
@@ -214,7 +223,14 @@ class MLDataCollector extends BaseSkill {
     return { labeledMarkets };
   }
 
+  _cfMeta(now) {
+    if (!this.cfIndex) return {};
+    const c = this.cfIndex.snapshot(now);
+    return { cf_brti: c.value, cf_brti_age_ms: c.time ? now - c.time : null, cf_brti_avg60: c.avg60, cf_brti_avg60_n: c.avg60Samples, cf_error: c.error };
+  }
+
   async stop() {
+    this.cfIndex?.stop();
     if (this.interval) clearInterval(this.interval);
     this.interval = null;
     await super.stop();
