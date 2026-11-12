@@ -260,6 +260,22 @@ app.post('/api/server/restart', controlOnly, (req, res) => {
   }, 300);
 });
 
+// Main-bot panel + scorecard (display only).
+app.get('/api/main-bot', (req, res) => {
+  try {
+    const out = require('./lib/main-bot-summary').load(agent.state);
+    // One-line research total (since the dashboard cutoff), for the collapsed section.
+    const D = require('./lib/dashboard-since'), since = D.sinceMs();
+    let bots = 0, trades = 0, pnl = 0, positive = 0;
+    for (const set of [agent.modelArena?.portfolios, agent.finalSelectivityLab?.policies, agent.baymax5kForward?.policies]) {
+      for (const p of Object.values(set || {})) { const v = D.viewSince(p, since); bots++; trades += v.trades.length; pnl += v.realizedPnl; if (v.realizedPnl > 0) positive++; }
+    }
+    out.research = { bots, trades, pnl, positive };
+    res.json(out);
+  }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/bot/status', (req, res) => {
   res.json({ running: agent.running, mode: currentMode() });
 });
