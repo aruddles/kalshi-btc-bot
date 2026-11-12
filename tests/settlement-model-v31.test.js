@@ -143,3 +143,17 @@ test('V3.1 REGRESSION: normal CDF is correct and continuous at 0 in every model 
   const p = pm.calculateImpliedProbability(80000.01, 80000, 300000, 900000, feed);
   assert.ok(Math.abs(p.probUp - 0.5) < 0.01, `probUp=${p.probUp}`);
 });
+
+test('V3.9 primary verdict uses BRTI proxy vs GBM and needs MIN_MARKETS', () => {
+  const r = rng(5), rows = [];
+  for (let m = 0; m < 220; m++) {
+    const y = r() < 0.5 ? 1 : 0;
+    for (let k = 0; k < 3; k++) rows.push({ ticker: `B${m}`, ts: new Date(m * 1e6 + k).toISOString(), label: y,
+      collector_meta: { collector_version: 'live-collector-v3.1', kalshi_yes_bid: .49, kalshi_yes_ask: .51, time_remaining_s: 100 + k * 200, gbm_p: .5, settlement_p: null, brti_p: y ? .8 : .2 } });
+  }
+  const out = E.evaluate(rows);
+  assert.equal(out.primary.status, 'BRTI_BETTER_THAN_GBM');
+  assert.equal(out.primary.markets, 220);
+  assert.equal(out.status, 'INSUFFICIENT_DATA');
+  assert.equal(E.evaluate(rows.slice(0, 30)).primary.status, 'INSUFFICIENT_DATA');
+});

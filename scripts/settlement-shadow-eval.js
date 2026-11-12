@@ -27,6 +27,7 @@ const E = require('../lib/settlement-shadow-eval');
       const k = b.brierDiff?.BRTI_minus_KALSHI;
       if (k) console.log(`BRTI_PROXY - KALSHI Brier 95% CI: [${k.low.toFixed(5)}, ${k.high.toFixed(5)}]`);
     }
-    console.log(`STATUS: ${r.status}`);
+    console.log(`PRIMARY (BRTI proxy vs GBM, ${r.primary.markets}/${r.primary.minMarkets} markets): ${r.primary.status}`);
+    console.log(`Legacy Binance-strike status: ${r.status}`);
   } catch (e) { console.error(`[SETTLEMENT-SHADOW-EVAL] ${e.message}`); process.exitCode = 1; }
 })();
