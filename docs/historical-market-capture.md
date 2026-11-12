@@ -38,7 +38,8 @@ Each NDJSON row has a `schema_version`, event `type`, UTC millisecond timestamps
 
 - `market_metadata` and `market_settlement`
 - `kalshi_ws` with the untouched Kalshi snapshot, delta, or trade message, including exchange sequence IDs and source timestamps when provided
-- `derived_quote` with executable YES/NO bid and ask levels reconstructed from the latest valid order-book state
+- `derived_quote` with executable YES/NO best bid/ask and the top `CAPTURE_QUOTE_DEPTH` levels (default 5), written when the top of book changes; replay the raw `kalshi_ws` deltas for full depth
+- `usd_reference_quote` with Coinbase/Kraken/Bitstamp BTC/USD best bid/ask (`CAPTURE_USD_REFERENCE=false` disables), used by `npm run lag:study`
 - `binance_book_ticker` with Binance best bid/ask and sizes
 - `sequence_gap`, `connection`, and `capture_error` diagnostics
 

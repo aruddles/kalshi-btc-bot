@@ -187,47 +187,21 @@ where:
 - `sigma`: Annualized realized volatility scaled to the contract's time horizon
 - `T_remaining`: Fraction of total contract duration remaining (0 to 1)
 
-### Normal CDF Approximation
+### Normal CDF
 
-The cumulative normal distribution is computed using the Abramowitz & Stegun (1964) rational approximation:
-
-```
-Phi(x) = 0.5 * (1 + sign(x) * Y)
-
-where:
-    Y = 1 - P(t) * exp(-x^2 / 2) / sqrt(2 * pi)
-    P(t) = ((((a5*t + a4)*t + a3)*t + a2)*t + a1) * t
-    t = 1 / (1 + p * |x|)
-
-Constants:
-    p  = 0.3275911
-    a1 = 0.254829592
-    a2 = -0.284496736
-    a3 = 1.421413741
-    a4 = -1.453152027
-    a5 = 1.061405429
-```
-
-Bounded at `[-8, 8]` standard deviations to prevent numerical instability. Probabilities are clamped to `[0.01, 0.99]` to avoid extreme Kelly sizing.
+`lib/normal.js` is the single implementation: `Phi(x) = 0.5 * (1 + erf(x / sqrt(2)))`, with erf from Abramowitz & Stegun 7.1.26 (|error| < 1.5e-7). Inputs beyond ±8 return 0/1. Probabilities are clamped to `[0.01, 0.99]` to avoid extreme Kelly sizing. (Before v3.1 the CDF was wrong — Φ(0) = 0.80 — see `docs/changelog/V3_1_SETTLEMENT_MODEL.md`.)
 
 ### Realized Volatility Estimation
 
-Volatility is estimated from the trailing window of 1-second Binance price samples using the standard log-return method. The window length matches the contract's total duration (900 seconds for 15-minute contracts), ensuring the volatility estimate reflects the relevant time horizon:
+`lib/volatility.js`, fed by ~1-second Binance mid prices (1 hour of history):
 
 ```
-r_i = ln(P_i / P_{i-1})        for each consecutive price sample
-
-mean = (1/N) * sum(r_i)
-variance = (1/N) * sum((r_i - mean)^2)
-std_per_sample = sqrt(variance)
-
-avg_interval = (t_last - t_first) / (N - 1)
-samples_in_window = window_seconds * 1000 / avg_interval
-
-volatility = std_per_sample * sqrt(samples_in_window)
+var_per_sec(window) = sum(ln(P_i / P_{i-1})^2) / sum(dt_i)      # time-normalised; gaps count at real length
+var = 0.5 * var_per_sec(last contract_duration) + 0.5 * var_per_sec(full history)
+volatility = sqrt(var * contract_duration_seconds)
 ```
 
-Default fallback: `0.15%` per 15-minute period when fewer than 10 samples are available. The price history buffer maintains 600 samples (~10 minutes at 1 sample/second).
+The trailing-window estimate is shrunk halfway toward the longer history. On the 5k-market historical set (leak-corrected, chronological 60/40 split) this cut GBM log loss from 0.455 to 0.445 on the held-out split, by tempering overconfidence after short vol lulls. Fallback: `0.15%` per 15 minutes when fewer than 10 returns are available.
 
 ### Edge Cases
 
@@ -375,7 +349,7 @@ Positions that are not exited via take-profit are held to contract settlement:
 | Data | Best bid/ask prices |
 | Failover | Binance.US -> Binance Global -> REST polling (1s) |
 | Reconnection | Exponential backoff (1s initial, 30s max) |
-| Price history | 600 samples (~10 min), used for volatility calculation |
+| Price history | 3600 samples (~1 hour), used for volatility and trend |
 
 ### Polymarket Feed
 
@@ -515,15 +489,15 @@ ws ^8.18.0
 
 ### Prerequisites
 
-- Node.js 16+
+- Node.js 18+ (tests use `node:test`)
 - Kalshi API credentials with trading permissions ([Kalshi API Settings](https://kalshi.com/settings/api))
 - RSA private key (PEM format) for Kalshi API authentication
 
 ### Installation
 
 ```bash
-git clone https://github.com/your-repo/kalshibot.git
-cd kalshibot
+git clone https://github.com/aruddles/kalshi-btc-bot.git
+cd kalshi-btc-bot
 npm install
 ```
 
@@ -542,6 +516,27 @@ npm start
 ```
 
 The Mission Control dashboard will be available at `http://localhost:3333`.
+
+### Tests
+
+```bash
+npm test
+```
+
+### Repository layout
+
+| Path | Contents |
+|------|----------|
+| `server.js` | Entry point: Express + Socket.io dashboard server, starts the MasterAgent |
+| `agents/` | Agent framework and skills (market data, analysis, trading, infrastructure) |
+| `bot/` | Feed and exchange clients wrapped by the skills (Binance, composite USD/BRTI proxy, Kalshi, Polymarket, RedStone, state, analytics DB) |
+| `lib/` | Pure model/economics code: normal CDF, volatility, settlement model, fees, ML pipeline and research labs |
+| `scripts/` | Research and data-capture CLIs (`npm run …`) |
+| `api/` | Vercel serverless endpoints |
+| `public/` | Mission Control dashboard |
+| `tests/` | `node:test` suite |
+| `docs/` | Guides; `docs/changelog/` holds the per-version research notes |
+| `data/` | Runtime state, datasets and models (git-ignored) |
 
 ### Monitoring
 

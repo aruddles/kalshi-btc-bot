@@ -12,6 +12,25 @@ const { KalshiSubscriptionManager } = require('../lib/kalshi-subscriptions');
 
 const seriesTicker = process.env.CAPTURE_SERIES_TICKER || process.env.SERIES_TICKER || 'KXBTC15M';
 const binanceSymbol = (process.env.CAPTURE_BINANCE_SYMBOL || 'btcusdt').toLowerCase();
+// Coinbase/Kraken/Bitstamp top of book (BRTI proxy constituents) for lead-lag research.
+const captureUsdReference = process.env.CAPTURE_USD_REFERENCE !== 'false';
+// derived_quote rows keep this many levels per side and are written only when the top of
+// book changes. Full depth is always recoverable by replaying the raw kalshi_ws deltas;
+// writing it on every delta (~460/s, ~19KB each) filled the 128MB budget in 15 seconds.
+const quoteDepth = Math.max(1, Number(process.env.CAPTURE_QUOTE_DEPTH) || 5);
+const lastTopOfBook = new Map();
+function writeDerivedQuote(ticker, seq, sourceTs, receivedAt) {
+  const q = executableQuotes(bookStates.get(ticker));
+  if (!q) return;
+  const top = JSON.stringify([q.yesBid, q.yesAsk, q.noBid, q.noAsk]);
+  if (lastTopOfBook.get(ticker) === top) return;
+  lastTopOfBook.set(ticker, top);
+  const cut = levels => levels.slice(0, quoteDepth);
+  const depth = { yesBids: cut(q.depth.yesBids), yesAsks: cut(q.depth.yesAsks), noBids: cut(q.depth.noBids), noAsks: cut(q.depth.noAsks) };
+  writeEvent('derived_quote', { ticker, quotes: { ...q, depth }, book_seq: seq, depth_levels: quoteDepth }, sourceTs, receivedAt);
+}
+const UsdReferenceFeed = require('../bot/usd-reference-feed');
+let usdReference = null;
 const intervalMs = Math.max(1000, Number(process.env.CAPTURE_DISCOVERY_INTERVAL_MS || 10000));
 const outputDir = path.resolve(process.env.CAPTURE_OUTPUT_DIR || './data/captures');
 const stopAfterMinutes = Number(process.env.CAPTURE_DURATION_MINUTES || 0);
@@ -221,6 +240,8 @@ function connectKalshi() {
     if (message.type === 'orderbook_snapshot' && ticker) {
       bookStates.set(ticker, normalizeSnapshot(message));
       if (Number.isInteger(message.sid) && Number.isInteger(message.seq)) lastSequences.set(message.sid, message.seq);
+      lastTopOfBook.delete(ticker);
+      writeDerivedQuote(ticker, message.seq, message.msg?.ts_ms || null, receivedAt);
     } else if (message.type === 'orderbook_delta' && ticker) {
       const previous = lastSequences.get(message.sid);
       if (hasSequenceGap(previous, message.seq)) {
@@ -236,7 +257,7 @@ function connectKalshi() {
         }
       }
       if (Number.isInteger(message.seq)) lastSequences.set(message.sid, message.seq);
-      if (bookStates.has(ticker)) writeEvent('derived_quote', { ticker, quotes: executableQuotes(bookStates.get(ticker)), book_seq: message.seq }, message.msg?.ts_ms || null, receivedAt);
+      if (bookStates.has(ticker)) writeDerivedQuote(ticker, message.seq, message.msg?.ts_ms || null, receivedAt);
     }
     const sourceTs = Number(message.msg?.ts_ms) || (message.msg?.created_time ? Date.parse(message.msg.created_time) : null);
     writeEvent('kalshi_ws', message, Number.isFinite(sourceTs) ? sourceTs : null, receivedAt);
@@ -353,6 +374,7 @@ function stopCaptureNow(reason = 'requested') {
   for (const ws of [kalshiWs, binanceWs]) {
     if (ws && ws.readyState < WebSocket.CLOSING) ws.close();
   }
+  usdReference?.stop();
   finishRequested = true;
   finishOutputIfReady();
 }
@@ -368,10 +390,17 @@ async function main() {
   console.log('Data-only: this process has no order-placement or cancellation calls. Press Ctrl+C to stop.');
   process.on('SIGINT', () => stopCapture('requested'));
   process.on('SIGTERM', () => stopCapture('requested'));
-  writeEvent('capture_started', { series_ticker: seriesTicker, binance_symbol: binanceSymbol, interval_ms: intervalMs });
+  writeEvent('capture_started', { series_ticker: seriesTicker, binance_symbol: binanceSymbol, usd_reference: captureUsdReference, interval_ms: intervalMs });
   if (stopping) return;
   connectKalshi();
   connectBinance();
+  if (captureUsdReference) {
+    usdReference = new UsdReferenceFeed({
+      logger: { warn: m => writeEvent('connection', { service: 'usd_reference', status: 'warning', message: m }) },
+      onQuote: (venue, q, ts) => writeEvent('usd_reference_quote', { venue, bid: q.bid, ask: q.ask, mid: q.mid }, null, ts),
+    });
+    usdReference.start();
+  }
   await refreshMarkets();
   if (stopping) return;
   discoveryTimer = setInterval(refreshMarkets, intervalMs);

@@ -78,7 +78,7 @@ test('V3.1 collector uses live per-market volatility/trend instead of frozen sta
     const hist = []; for (let i = -60; i < 0; i++) hist.push({ timestamp: open + i * 1000, price: 100000 });
     const feed = { priceHistory: hist, getRecentVolatility: () => 0.0042 };
     const state = {
-      activeMarkets: [{ ticker: 'T', openTime: open, closeTime: close, yesAsk: .55, noAsk: .46, yesBid: .54, noBid: .45, floorStrike: 99990 }],
+      activeMarkets: [{ ticker: 'T', openTime: open, closeTime: close, yesAsk: .55, noAsk: .46, yesBid: .54, noBid: .45, yesBidSize: 12, floorStrike: 99990 }],
       btcPrice: { binance: 100050 }, marketOpenPrices: { T: 100000 },
       model: { impliedProbUp: .9, volatility: .001, trend: 'BEARISH', trendStrength: .1, trendROC: -1 },
       stats: {}, balance: {},
@@ -97,6 +97,8 @@ test('V3.1 collector uses live per-market volatility/trend instead of frozen sta
     assert.notEqual(v[8], .9);                   // model_prob recomputed for this market
     assert.equal(rows[0].collectorMeta.collector_version, 'live-collector-v3.1');
     assert.equal(rows[0].collectorMeta.floor_strike, 99990);
+    assert.equal(rows[0].collectorMeta.kalshi_yes_bid_size, 12);
+    assert.equal(rows[0].collectorMeta.kalshi_yes_ask_size, null);
     assert.ok(rows[0].collectorMeta.settlement_p > 0.5);
   } finally { supabase.enabled = oldEnabled; supabase.logFeatures = oldLog; }
 });
@@ -140,4 +142,18 @@ test('V3.1 REGRESSION: normal CDF is correct and continuous at 0 in every model 
   const feed = { getRecentVolatility: () => 0.0015 };
   const p = pm.calculateImpliedProbability(80000.01, 80000, 300000, 900000, feed);
   assert.ok(Math.abs(p.probUp - 0.5) < 0.01, `probUp=${p.probUp}`);
+});
+
+test('V3.9 primary verdict uses BRTI proxy vs GBM and needs MIN_MARKETS', () => {
+  const r = rng(5), rows = [];
+  for (let m = 0; m < 220; m++) {
+    const y = r() < 0.5 ? 1 : 0;
+    for (let k = 0; k < 3; k++) rows.push({ ticker: `B${m}`, ts: new Date(m * 1e6 + k).toISOString(), label: y,
+      collector_meta: { collector_version: 'live-collector-v3.1', kalshi_yes_bid: .49, kalshi_yes_ask: .51, time_remaining_s: 100 + k * 200, gbm_p: .5, settlement_p: null, brti_p: y ? .8 : .2 } });
+  }
+  const out = E.evaluate(rows);
+  assert.equal(out.primary.status, 'BRTI_BETTER_THAN_GBM');
+  assert.equal(out.primary.markets, 220);
+  assert.equal(out.status, 'INSUFFICIENT_DATA');
+  assert.equal(E.evaluate(rows.slice(0, 30)).primary.status, 'INSUFFICIENT_DATA');
 });

@@ -11,6 +11,7 @@ const BaseSkill = require('../../core/base-skill');
 const mlPipeline = require('../../../lib/ml-pipeline');
 const supabase = require('../../../lib/supabase');
 const { settlementProbabilityForMarket } = require('../../../lib/settlement-model');
+const { feedsFrom, marketPriceInputs } = require('../../../lib/market-prices');
 
 // v3.1: volatility/trend/model_prob are computed per market at snapshot time.
 // Earlier collectors copied state.model, which freezes after TRADING_WINDOW,
@@ -77,21 +78,24 @@ class MLDataCollector extends BaseSkill {
   // when the feed/trend skills are unavailable (e.g. isolated tests).
   _liveInputs(market, state, now) {
     const model = state.model || {};
-    const feed = this._skill('binance-price-feed')?.getFeed?.() || null;
+    const binanceFeed = this._skill('binance-price-feed')?.getFeed?.() || null;
     const trendData = this._skill('trend-analysis')?.getIndicator?.()?.getTrend?.() || null;
     const btcPrice = state.btcPrice?.binance || 0;
-    const openPrice = state.marketOpenPrices?.[market.ticker] || 0;
+    // Opening/current price pair from one feed (composite USD preferred, else Binance).
+    const px = this.context?.registry ? marketPriceInputs(market, state, feedsFrom(this.context.registry)) : null;
+    const feed = px?.feed || binanceFeed;
     const durationMs = Number.isFinite(market.openTime) && market.closeTime > market.openTime ? market.closeTime - market.openTime : 900000;
     const sigma = feed ? feed.getRecentVolatility(durationMs / 1000) : (model.volatility || 0.0015);
     const live = Boolean(feed);
     let gbmProb = null;
     const probModel = this._skill('probability-model');
-    if (feed && probModel && openPrice > 0 && btcPrice > 0) {
-      gbmProb = probModel.calculateImpliedProbability(btcPrice, openPrice, Math.max(0, market.closeTime - now), durationMs, feed).probUp;
+    if (px && probModel) {
+      gbmProb = probModel.calculateImpliedProbability(px.currentPrice, px.openPrice, Math.max(0, market.closeTime - now), durationMs, px.feed).probUp;
     }
-    const settle = feed && btcPrice > 0 ? settlementProbabilityForMarket({ market, currentPrice: btcPrice, now, feed }) : null;
+    const settle = binanceFeed && btcPrice > 0 ? settlementProbabilityForMarket({ market, currentPrice: btcPrice, now, feed: binanceFeed }) : null;
+    const brti = probModel?.calculateReferenceSettlementProbability?.(market, now) || null;
     return {
-      live, sigma, gbmProb, settle,
+      live, sigma, gbmProb, settle, brti, px,
       trend: trendData ? (trendData.trend || 'NEUTRAL') : (model.trend || 'NEUTRAL'),
       trendStrength: trendData ? (trendData.strength || 0) : (model.trendStrength || 0),
       trendROC: trendData ? (trendData.roc || 0) : (model.trendROC || 0),
@@ -101,8 +105,8 @@ class MLDataCollector extends BaseSkill {
   _marketContext(market, state, live) {
     const stats = state.stats || {};
     return {
-      btcPrice: state.btcPrice?.binance || 0,
-      openPrice: state.marketOpenPrices?.[market.ticker] || 0,
+      btcPrice: live.px ? live.px.currentPrice : (state.btcPrice?.binance || 0),
+      openPrice: live.px ? live.px.openPrice : (state.marketOpenPrices?.[market.ticker] || 0),
       timeRemainingMs: Math.max(0, (market.closeTime || 0) - Date.now()),
       totalDurationMs: 900000,
       sigma: live.sigma,
@@ -129,9 +133,8 @@ class MLDataCollector extends BaseSkill {
 
     for (const market of markets) {
       if (!market?.ticker || !market.closeTime || market.closeTime <= now) continue;
-      if (!state.btcPrice?.binance) continue;
-
       const live = this._liveInputs(market, state, now);
+      if (!live.px && !state.btcPrice?.binance) continue;
       const modelProb = live.live
         ? (Number.isFinite(live.gbmProb) ? live.gbmProb : 0.5)
         : (Number.isFinite(state.model?.impliedProbUp) ? state.model.impliedProbUp : 0.5);
@@ -161,13 +164,20 @@ class MLDataCollector extends BaseSkill {
           collector_version: COLLECTOR_VERSION,
           live_inputs: live.live,
           gbm_p: live.gbmProb,
+          open_price_source: live.px ? live.px.source : null,
           settlement_p: live.settle ? live.settle.probUp : null,
           settlement_strike: live.settle ? live.settle.strike : null,
           floor_strike: Number.isFinite(market.floorStrike) ? market.floorStrike : null,
           strike_basis: live.settle ? live.settle.basis : null,
+          brti_p: live.brti ? live.brti.probUp : null,
+          reference_price: live.brti ? live.brti.referencePrice : null,
+          reference_bias: live.brti ? live.brti.bias : null,
           final_window_samples: live.settle ? live.settle.observedSamples : null,
           kalshi_yes_ask: market.yesAsk ?? null,
           kalshi_yes_bid: market.yesBid ?? null,
+          // Top-of-book sizes (contracts). NO bid size = YES ask size and vice versa.
+          kalshi_yes_bid_size: Number.isFinite(market.yesBidSize) ? market.yesBidSize : null,
+          kalshi_yes_ask_size: Number.isFinite(market.yesAskSize) ? market.yesAskSize : null,
           time_remaining_s: Math.max(0, (market.closeTime - now) / 1000),
         },
       });

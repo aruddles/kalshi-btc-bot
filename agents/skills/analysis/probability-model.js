@@ -87,6 +87,15 @@ class ProbabilityModel extends BaseSkill {
     return settlementProbabilityForMarket({ market, currentPrice, now, feed: binanceFeed });
   }
 
+  // Settlement model against Kalshi's official strike, using the composite USD
+  // (BRTI-proxy) feed. Returns null when that feed is unavailable or unhealthy.
+  calculateReferenceSettlementProbability(market, now = Date.now()) {
+    const ref = this.context?.registry?.get('usd-reference-feed');
+    if (!ref?.getFeed?.()) return null;
+    const { settlementProbabilityFromReference } = require('../../../lib/settlement-model');
+    return settlementProbabilityFromReference({ market, feed: ref.getFeed(), now, bias: ref.getBias() });
+  }
+
   kellySize(probability, executablePrice, feePerContract = 0, kellyFraction = 0.08) {
     const { kellyBankrollFraction } = require('../../../lib/kalshi-economics');
     return kellyBankrollFraction(probability, executablePrice, feePerContract, kellyFraction);

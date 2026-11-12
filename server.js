@@ -10,7 +10,6 @@
  * Architecture:
  *   server.js → MasterAgent → Orchestrator → Skills
  *
- * The legacy BotEngine is preserved at `node kalshi-bot.js` for fallback.
  */
 
 require('dotenv').config();
@@ -64,6 +63,12 @@ const config = {
   POLYMARKET_CLOB_API: 'https://clob.polymarket.com',
 
   SERIES_TICKER: process.env.SERIES_TICKER || 'KXBTC15M',
+
+  // Probability model that drives trading: gbm_point (default) | settlement_avg | settlement_brti.
+  // The other models are always computed and logged in shadow.
+  PROB_MODEL: ['gbm_point', 'settlement_avg', 'settlement_brti'].includes(process.env.PROB_MODEL) ? process.env.PROB_MODEL : 'gbm_point',
+  // Composite Coinbase/Kraken/Bitstamp BTC/USD feed (BRTI proxy). Market data only.
+  USD_REFERENCE_ENABLED: process.env.USD_REFERENCE_ENABLED !== 'false',
   SLOT_DURATION: parseInt(process.env.SLOT_DURATION) || 900, // 15 min
 
   // Strategy thresholds
@@ -172,14 +177,35 @@ function persistMode(mode) {
   try { fs.writeFileSync(RUNTIME_MODE_FILE, JSON.stringify({ mode }, null, 2)); } catch (e) { console.warn('[Server] Could not persist runtime mode:', e.message); }
 }
 
+// Rolling 1-hour history of the front market's YES midpoint (percent), so the dashboard
+// chart's YES CHANCE view has data for 5M/15M/1H as soon as a browser connects.
+const CHART_HISTORY_MS = 60 * 60 * 1000;
+const chanceHistory = [];
+function referenceSkill() { return agent.registry.get('usd-reference-feed'); }
+setInterval(() => {
+  const now = Date.now();
+  // Stream the composite USD (BRTI-proxy) price to dashboards once a second.
+  const ref = referenceSkill()?.getFeed?.();
+  if (ref?.isHealthy?.()) io.emit('price:reference', { price: ref.latest.price, ts: ref.latest.timestamp, venues: ref.latest.venues });
+  const m = agent.state?.activeMarkets?.[0];
+  while (chanceHistory.length && now - chanceHistory[0].t > CHART_HISTORY_MS) chanceHistory.shift();
+  if (!agent.running || !m?.ticker || (m.refreshedAt && now - m.refreshedAt > 15000)) return;
+  const bid = Number(m.yesBid), ask = Number(m.yesAsk);
+  if (!(bid > 0 && ask > 0 && bid < 1 && ask < 1 && ask >= bid)) return;
+  chanceHistory.push({ t: now, ticker: m.ticker, v: Math.round((bid + ask) * 5000) / 100 });
+}, 1000).unref();
+
 function dashboardBootstrap() {
   const snapshot = agent.state?.getSnapshot?.() || null;
   let priceHistory = [];
   try {
     const feed = agent.registry.get('binance-price-feed')?.getFeed?.();
-    if (Array.isArray(feed?.priceHistory)) priceHistory = feed.priceHistory.slice(-240);
+    const cutoff = Date.now() - CHART_HISTORY_MS;
+    if (Array.isArray(feed?.priceHistory)) priceHistory = feed.priceHistory.filter(x => x.timestamp >= cutoff).map(x => ({ t: x.timestamp, p: x.price }));
   } catch (_) { /* skill may still be warming */ }
-  return { snapshot, priceHistory, ts: Date.now() };
+  const refFeed = referenceSkill()?.getFeed?.();
+  const referenceHistory = (refFeed?.priceHistory || []).filter(x => x.timestamp >= Date.now() - CHART_HISTORY_MS).map(x => ({ t: x.timestamp, p: x.price }));
+  return { snapshot, priceHistory, referenceHistory, chanceHistory: chanceHistory.slice(), ts: Date.now() };
 }
 
 // Health check
@@ -215,6 +241,23 @@ app.post('/api/bot/stop', controlOnly, (req, res) => {
   agent.stop();
   io.emit('bot:status', { running: false });
   res.json({ status: 'stopped' });
+});
+
+// Restart the server process (reloads code). Requires the run-forever loop
+// (`npm run forever`) to come back up; without it this just stops the server.
+const restart = require('./lib/server-restart');
+const DATA_DIR = path.join(__dirname, 'data');
+app.post('/api/server/restart', controlOnly, (req, res) => {
+  const check = restart.canRestart(currentMode());
+  if (!check.ok) return res.status(409).json({ error: check.error });
+  restart.writeMarker(DATA_DIR, { running: agent.running, mode: currentMode() });
+  res.json({ status: 'restarting', resumeTrading: agent.running });
+  console.log('[Server] Restart requested from dashboard');
+  setTimeout(() => {
+    try { if (agent.state) agent.state.saveNow(); agent.stop(); } catch (err) { console.error('[Server] restart cleanup:', err.message); }
+    server.close();
+    process.exit(0);
+  }, 300);
 });
 
 app.get('/api/bot/status', (req, res) => {
@@ -300,6 +343,8 @@ app.get('/api/ml-challengers', (req, res) => { const p=require('./lib/ml-pipelin
 app.get('/api/ml-paper', (req, res) => { res.json(agent.getMlPaperSnapshot?.() || { enabled:false,status:'OFF',simulated:true }); });
 app.get('/api/model-arena', (req,res)=>{ res.json(agent.getModelArenaSnapshot?.() || {enabled:false,status:'OFF',simulated:true,bots:{}}); });
 app.get('/api/final-selectivity', (req,res)=>{ res.json(agent.getFinalSelectivitySnapshot?.() || {status:'OFF',simulated:true,modelIdentity:'FINAL_CHALLENGER_1K',policies:{}}); });
+// Composite BTC/USD (BRTI proxy): venue health, basis correction and strike accuracy vs Binance.
+app.get('/api/reference', (req, res) => res.json(referenceSkill()?.getStatus?.() || { healthy: false, running: false }));
 app.get('/api/baymax-5k-forward', (req,res)=>{ res.json(agent.getBaymax5kForwardSnapshot?.() || {status:'OFF',simulated:true,liveOrderCapable:false,modelIdentity:'BAYMAX_FINAL_5K',policies:{}}); });
 
 // API: get agent skill registry status
@@ -362,8 +407,16 @@ server.listen(PORT, HOST, () => {
   console.log(`  Skills API: http://localhost:${PORT}/api/skills`);
   console.log(`  Config: ${config.SERIES_TICKER} | MinEdge=${config.MIN_EDGE}% | MinDiv=${config.MIN_DIVERGENCE}% | MaxPos=$${config.MAX_POSITION_SIZE}\n`);
 
-  // Bot does NOT auto-start — user controls via dashboard toggle
-  console.log('  Bot is IDLE. Use the dashboard toggle to start trading.\n');
+  // Bot does NOT auto-start — user controls via dashboard toggle —
+  // except right after a dashboard restart of a running PAPER/PAPER+ bot.
+  if (restart.consumeAutostart(DATA_DIR, currentMode())) {
+    console.log('  Restarted from dashboard: resuming trading.\n');
+    agent.start()
+      .then(() => { io.emit('bot:status', { running: true }); io.emit('bootstrap', dashboardBootstrap()); })
+      .catch((err) => { console.error('[Server] Bot auto-resume failed:', err.message); io.emit('bot:status', { running: false, error: err.message }); });
+  } else {
+    console.log('  Bot is IDLE. Use the dashboard toggle to start trading.\n');
+  }
 });
 
 // Graceful shutdown

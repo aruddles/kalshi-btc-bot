@@ -37,3 +37,16 @@
 .arena-market{margin-bottom:18px}.arena-section-title{display:flex;align-items:center;justify-content:space-between;margin:18px 2px 8px}.arena-section-title h2{font-size:15px;letter-spacing:.08em}.arena-pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}.arena-bot{min-height:190px}.arena-bot.challenger{border-style:double}.arena-bot .arena-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.arena-bot .decision-big{font-size:21px;font-weight:800;margin:10px 0}.arena-bot .arena-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.arena-bot .arena-grid span{font-size:10px;opacity:.75}.arena-bot .arena-grid b{display:block;font-size:13px;margin-top:3px;opacity:1}.arena-table>div{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;padding:8px;border-bottom:1px solid rgba(255,255,255,.08);font-size:12px}.diagnostics{margin-top:16px}.diagnostics summary{cursor:pointer;font-weight:700}.diag-body{padding-top:12px}.console-tools{display:flex;gap:8px;margin:8px 0}.console-tools input{flex:1;background:#0b0f14;border:1px solid #29323d;color:#dfe7ef;padding:8px;border-radius:5px}@media(max-width:900px){.arena-pair{grid-template-columns:1fr}.arena-table>div{grid-template-columns:repeat(2,1fr)}}
 
 .header-actions{display:flex;align-items:center;gap:12px}.arena-start{padding:8px 18px;font-weight:800}.arena-start.running{border-color:#ff6b6b}.final-lab{margin-top:12px}.lab-funnel{padding:10px 0;font-size:12px;opacity:.8}.lab-open{display:flex;gap:8px;flex-wrap:wrap}.lab-open span{padding:6px 9px;border:1px solid var(--border,#333);border-radius:6px}
+
+/* Live chart (Kalshi-style) */
+.chart-headline h2{transition:color .2s}.chart-change{display:block;margin-top:6px;font-size:11px!important;font-weight:700;color:var(--muted)}
+.chart-toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px 0}
+.seg{display:inline-flex;background:#0a0f17;border:1px solid var(--border);border-radius:8px;padding:3px;gap:2px}
+.seg button{border:0;background:transparent;color:var(--muted);font:800 10px Inter,sans-serif;letter-spacing:.6px;padding:7px 12px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:background .15s,color .15s}
+.seg button:hover{color:var(--text);background:#121a27}.seg button.on{background:#1b2638;color:#fff;box-shadow:inset 0 0 0 1px #2b3a55}
+.live-dot{width:6px;height:6px;border-radius:50%;background:var(--red);display:inline-block}
+.seg button.on .live-dot{animation:livepulse 1.4s ease-out infinite}
+@keyframes livepulse{0%{box-shadow:0 0 0 0 rgba(255,100,116,.7)}100%{box-shadow:0 0 0 7px rgba(255,100,116,0)}}
+.arena-market .chart{height:320px;padding:10px 6px 0 12px}.arena-market .chart canvas{display:block;width:100%;height:100%;cursor:crosshair;touch-action:pan-y}
+.strip small{display:block;color:var(--muted);font-size:8px;margin-top:3px;text-transform:none}
+@media (max-width:760px){.arena-market .cardhead{flex-wrap:wrap;gap:10px 18px}.arena-market .chart-headline{flex-basis:100%}.arena-market .cardhead h2{font-size:22px}.arena-market .chart{height:260px}.chart-toolbar{padding:10px 12px 0}.seg button{padding:7px 9px}}

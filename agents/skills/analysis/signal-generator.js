@@ -16,6 +16,7 @@
 
 const BaseSkill = require('../../core/base-skill');
 const { estimateTakerFeeDollars, expectedValuePerContract, sizeContracts } = require('../../../lib/kalshi-economics');
+const { feedsFrom, marketPriceInputs } = require('../../../lib/market-prices');
 
 class SignalGenerator extends BaseSkill {
   constructor() {
@@ -122,13 +123,13 @@ class SignalGenerator extends BaseSkill {
   _generateSignals(kalshiMarkets, state) {
     const signals = [];
     const now = Date.now();
-    const btcPrice = state.btcPrice.binance;
-    if (!btcPrice) return signals;
+    const btcPrice = state.btcPrice.binance; // only for the Binance-based settlement_avg shadow model
 
     const probModel = this.context.registry.get('probability-model');
     const trendSkill = this.context.registry.get('trend-analysis');
     const polySkill = this.context.registry.get('polymarket-price-feed');
     const binanceFeed = this.context.registry.get('binance-price-feed').getFeed();
+    const feeds = feedsFrom(this.context.registry);
 
     for (const market of kalshiMarkets) {
       const timeRemaining = market.closeTime - now;
@@ -140,9 +141,10 @@ class SignalGenerator extends BaseSkill {
       // Skip a market whose latest refresh failed: its quotes are stale.
       if (market.refreshedAt !== undefined && now - market.refreshedAt > this.maxQuoteAgeMs) continue;
 
-      const openPrice = state.marketOpenPrices[market.ticker];
-      const referenceMeta = state.marketOpenPriceMeta?.[market.ticker];
-      if (!openPrice || !referenceMeta || referenceMeta.source !== 'binance_at_market_open' || Math.abs(referenceMeta.timestamp - market.openTime) > 2500) continue;
+      // Opening and current price from the same feed (composite USD preferred, else Binance).
+      const px = marketPriceInputs(market, state, feeds);
+      if (!px) continue;
+      const openPrice = px.openPrice;
       if (!market.yesAsk || !market.noAsk) continue;
 
       const yesInRange = market.yesAsk >= this.minContractPrice && market.yesAsk <= this.maxContractPrice;
@@ -152,12 +154,16 @@ class SignalGenerator extends BaseSkill {
       const poly = polySkill.getCachedPrice(market.closeTime);
 
       // Calculate model probability
-      const legacyProb = probModel.calculateImpliedProbability(btcPrice, openPrice, timeRemaining, totalDuration, binanceFeed);
-      // Settlement-aware model is always computed (shadow); it drives trading only when PROB_MODEL=settlement_avg.
-      const settle = probModel.calculateSettlementProbability?.(market, btcPrice, binanceFeed, now) || null;
-      const useSettlement = String(this.context.config.PROB_MODEL || 'gbm_point') === 'settlement_avg';
-      if (useSettlement && !settle) continue;
-      const prob = useSettlement ? { ...legacyProb, probUp: settle.probUp, probDown: settle.probDown } : legacyProb;
+      const legacyProb = probModel.calculateImpliedProbability(px.currentPrice, openPrice, timeRemaining, totalDuration, px.feed);
+      // Settlement-aware models are always computed (shadow). One drives trading only when
+      // PROB_MODEL=settlement_avg (Binance strike proxy) or settlement_brti (Kalshi
+      // floor_strike + composite USD feed); if it is unavailable the market is skipped.
+      const settle = btcPrice ? (probModel.calculateSettlementProbability?.(market, btcPrice, binanceFeed, now) || null) : null;
+      const brti = probModel.calculateReferenceSettlementProbability?.(market, now) || null;
+      const probModelName = String(this.context.config.PROB_MODEL || 'gbm_point');
+      const chosen = probModelName === 'settlement_avg' ? settle : probModelName === 'settlement_brti' ? brti : null;
+      if (['settlement_avg', 'settlement_brti'].includes(probModelName) && !chosen) continue;
+      const prob = chosen ? { ...legacyProb, probUp: chosen.probUp, probDown: chosen.probDown } : legacyProb;
 
       // Get trend data
       const trendData = trendSkill.getIndicator() ? trendSkill.getIndicator().getTrend() : {};
@@ -191,14 +197,18 @@ class SignalGenerator extends BaseSkill {
       state.updateModel({
         impliedProbUp: prob.probUp,
         impliedProbDown: prob.probDown,
-        probModel: useSettlement ? 'settlement_avg' : 'gbm_point',
+        probModel: chosen ? probModelName : 'gbm_point',
         gbmProbUp: legacyProb.probUp,
         settlementProbUp: settle ? settle.probUp : null,
+        brtiProbUp: brti ? brti.probUp : null,
+        referencePrice: brti ? brti.referencePrice : null,
+        floorStrike: Number.isFinite(market.floorStrike) ? market.floorStrike : null,
         strikeBasis: settle ? settle.basis : null,
         spotMove: prob.move,
         spotMovePct: prob.movePct,
         timeRemaining: timeRemaining / 1000,
         targetPrice: openPrice,
+        openPriceSource: px.source,
         volatility: prob.sigma,
         trend: trendData.trend || 'NEUTRAL',
         trendStrength: trendData.strength || 0,

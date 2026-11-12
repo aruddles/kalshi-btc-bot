@@ -286,6 +286,7 @@ class BotState extends EventEmitter {
     const position = this.openPositions.splice(idx, 1)[0];
     const closed = { ...position, ...result, settleTime: Date.now() };
     this.closedPositions.push(closed);
+    require('../lib/trade-log').appendClosed(closed); // permanent history (in-memory list is capped)
 
     // Cap closed positions
     if (this.closedPositions.length > MAX_CLOSED_POSITIONS) {

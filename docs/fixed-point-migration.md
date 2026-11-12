@@ -47,7 +47,7 @@ Entries are immediate-or-cancel at the observed ask; exits are IOC + reduce-only
 - Paper broker fills only against displayed depth, charges fees plus a latency penalty, settles against real outcomes.
 - Risk rules from Rules.md are now code: loss tiers, 5-failure halt, balance floor, stale-price block, exposure cap, fee drift.
 - Kill switch: `./data/KILL` file, `TRADING_ENABLED=false`, or `POST /api/halt`. Exits stay allowed under soft halts; a 401 is a hard halt.
-- `kalshi-bot.js` (pre-agent monolith) is retired; original preserved inert in `legacy/`.
+- `kalshi-bot.js` (pre-agent monolith) is retired; its source remains in git history (removed from the tree in v3.2).
 
 ## Limits that remain
 

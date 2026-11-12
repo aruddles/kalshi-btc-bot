@@ -138,10 +138,10 @@ class PositionManager extends BaseSkill {
         closedTp.mlSettlementResult = market.result;
         closedTp.mlLabeled = true;
 
-        // PAPER+ counterfactual: after an early TP, record what the SAME entry
-        // would have earned if held through settlement. This is diagnostic only;
-        // it never changes cash, realized P&L, or the ML label.
-        if (String(this.context?.config?.TRADING_MODE || '').toLowerCase() === 'paper+') {
+        // Exit-vs-hold counterfactual (all modes since v3.8): after an early TP,
+        // record what the SAME entry would have earned if held through settlement.
+        // Diagnostic only; never changes cash, realized P&L, or the ML label.
+        if (!Number.isFinite(Number(closedTp.exitVsHoldDelta))) {
           const originalContracts = Number(closedTp.originalFilledContracts || closedTp.filledContracts || closedTp.contracts || 0);
           const originalCost = Number(closedTp.originalTotalCost || closedTp.cost || closedTp.totalCost || 0);
           const holdWon = closedTp.side === market.result;
@@ -150,7 +150,15 @@ class PositionManager extends BaseSkill {
           closedTp.holdToSettlementResult = market.result;
           closedTp.holdToSettlementPnl = holdPnl;
           closedTp.exitVsHoldDelta = Number(closedTp.pnl || 0) - holdPnl;
-          console.log(`[PositionManager] PAPER+ COUNTERFACTUAL: ${closedTp.ticker} ${closedTp.side} | early-exit P&L=${Number(closedTp.pnl || 0).toFixed(2)} | hold-to-settlement P&L=${holdPnl.toFixed(2)} | exit-minus-hold=${closedTp.exitVsHoldDelta.toFixed(2)}`);
+          try {
+            require('../../../lib/exit-hold-log').append({
+              orderId: closedTp.orderId, ticker: closedTp.ticker, side: closedTp.side,
+              mode: String(this.context?.config?.TRADING_MODE || ''), entryTime: closedTp.entryTime || null,
+              exitTime: closedTp.settleTime || null, contracts: originalContracts, cost: originalCost,
+              pnl: Number(closedTp.pnl || 0), holdPnl, delta: closedTp.exitVsHoldDelta, result: market.result,
+            });
+          } catch (err) { console.error('[PositionManager] exit-vs-hold log failed:', err.message); }
+          console.log(`[PositionManager] COUNTERFACTUAL: ${closedTp.ticker} ${closedTp.side} | early-exit P&L=${Number(closedTp.pnl || 0).toFixed(2)} | hold-to-settlement P&L=${holdPnl.toFixed(2)} | exit-minus-hold=${closedTp.exitVsHoldDelta.toFixed(2)}`);
         }
 
         state.emit('position:updated', closedTp);

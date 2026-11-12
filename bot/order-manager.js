@@ -42,7 +42,7 @@ class OrderManager {
 
   /**
    * Add a newly placed order to the pending queue.
-   * Called by engine.executeSignal() after Kalshi returns order confirmation.
+   * Called by the order executor after Kalshi returns order confirmation.
    */
   addPendingOrder(orderInfo) {
     // Fills reported in the placement response must be processed as NEW fills.

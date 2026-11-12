@@ -1,12 +1,13 @@
 {
   "name": "kalshibot",
-  "version": "3.1.0",
-  "description": "High-frequency arbitrage bot for Kalshi BTC contracts with Binance WebSocket, Polymarket signals, RedStone oracle, and Mission Control UI",
+  "version": "3.2.0",
+  "description": "Kalshi KXBTC15M (15-minute BTC) trading bot with Binance/Polymarket/RedStone feeds, risk guards, paper modes, and a Mission Control dashboard",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "legacy": "node kalshi-bot.js",
-    "dev": "node server.js",
+    "start": "node -r dotenv/config server.js",
+    "exit-vs-hold": "node scripts/exit-vs-hold.js",
+    "forever": "bash -c 'while true; do node -r dotenv/config server.js; echo \"[forever] server exited; restarting in 3s (Ctrl-C to quit)\"; sleep 3; done'",
+    "dev": "node -r dotenv/config server.js",
     "backtest": "node backtest/backtest.js",
     "test": "node --test tests/*.test.js",
     "backtest:verbose": "node backtest/backtest.js --verbose",
@@ -14,7 +15,10 @@
     "capture:markets": "node scripts/capture-kalshi-history.js",
     "capture:replay": "node scripts/replay-kalshi-capture.js",
     "capture:simulate": "node scripts/simulate-kalshi-capture.js",
+    "lag:study": "node scripts/lag-study.js",
     "historical:ml": "node scripts/build-historical-ml-dataset.js",
+    "historical:score": "node scripts/score-historical.js",
+    "historical:retrain": "node scripts/retrain-historical.js",
     "baymax:oos": "node scripts/baymax-oos.js",
     "baymax:5k": "node -r dotenv/config scripts/baymax-5k.js",
     "specialists:5k": "node -r dotenv/config scripts/specialists-5k.js",
@@ -43,9 +47,5 @@
     "express": "^4.21.0",
     "socket.io": "^4.7.5",
     "ws": "^8.18.0"
-  },
-  "optionalDependencies": {
-    "@langchain/openai": "^0.3.0",
-    "langchain": "^0.3.0"
   }
 }

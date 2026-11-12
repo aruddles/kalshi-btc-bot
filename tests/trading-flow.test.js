@@ -16,7 +16,6 @@ const RiskManager = require('../agents/skills/trading/risk-manager');
 const SignalGenerator = require('../agents/skills/analysis/signal-generator');
 const PositionManager = require('../agents/skills/trading/position-manager');
 const OrderExecutor = require('../agents/skills/trading/order-executor');
-const Strategy = require('../bot/strategy');
 Module._load = originalLoad;
 
 const { TradingGuard } = require('../lib/trading-guard');
@@ -71,7 +70,7 @@ async function riskFor(state, config = {}) {
   return { risk, guard, client, context };
 }
 
-const signal = (o = {}) => ({ type: 'DIRECTIONAL_YES', ticker: 'T', side: 'yes', priceDecimal: 0.5, priceCents: 50, contracts: 4, estimatedEntryFee: 0.1, edge: 12, ...o });
+const signal = (o = {}) => ({ type: 'DIRECTIONAL_YES', ticker: 'T', side: 'yes', priceDecimal: 0.5, priceCents: 50, contracts: 4, estimatedEntryFee: 0.1, edge: 12, modelProb: 0.7, ...o });
 
 // ---------- OrderManager regression ----------
 test('REGRESSION: an order that fills immediately at placement becomes a tracked position', () => {
@@ -300,6 +299,7 @@ async function executorHarness({ fillSize = 100 } = {}) {
       return paper.place(specFromOrderData(o), marketNow);
     },
     getOrder: async id => paper.get(id),
+    fetchMarket: async () => marketNow, // paper reprices from the same quote the broker fills against
     fetchBalance: async () => paper.balance(),
     recordSettlement: (t, r) => paper.settle(t, r),
   };
@@ -370,23 +370,6 @@ test('executor: the order sent is an immediate-or-cancel limit in dollar strings
   assert.ok(!('no_price' in sent) && !('yes_price' in sent));
 });
 
-// ---------- Legacy strategy fixes ----------
-test('REGRESSION (legacy strategy): sizing of zero contracts does not force a 1-contract trade', () => {
-  const state = new FakeState();
-  state.balance = { total: 0.3, available: 0.3, reserved: 0 };
-  state.marketOpenPrices = { T: 100000 };
-  state.marketOpenPriceMeta = { T: { source: 'binance_at_market_open', timestamp: Date.now() - 60000 } };
-  state.btcPrice.binance = 100500; // big up move => model very sure of UP
-  state.updateModel = () => {};
-  const feed = { getRecentVolatility: () => 0.001 };
-  const st = new Strategy(state, { MIN_DIVERGENCE: 1, KELLY_FRACTION: 0.25, MAX_POSITION_SIZE: 5, MIN_CONTRACT_PRICE: 35, MAX_CONTRACT_PRICE: 65, TREND_ENABLED: false }, feed);
-  const now = Date.now();
-  const market = { ticker: 'T', openTime: now - 60000, closeTime: now + 840000, yesAsk: 0.5, noAsk: 0.5, yesAskCents: 50, noAskCents: 50 };
-  const signals = st.generateSignals([market], null);
-  assert.ok(signals.every(s => s.contracts >= 1));
-  assert.equal(signals.length, 0, '$0.30 cannot afford a 50c contract plus fee');
-});
-
 test('LIVE REPRICE: executor uses the fresh executable ask instead of stale signal price', async () => {
   const h = await executorHarness();
   h.client.isPaper = false;
@@ -452,4 +435,29 @@ test('REGRESSION: paper position settles after original simulated order is lost'
   const pm = new PositionManager(); pm.context={registry:{get:n=> n==='state-manager'?{botState:state}:n==='kalshi-market-data'?{getClient:()=>client}:{updateOrderDirect(){},logMarketSnapshotDirect(){}}},config:{TRADING_MODE:'paper+'}};
   const r=await pm._settlePosition('paper-lost');
   assert.equal(getOrderCalled,false); assert.equal(r.settled,true); assert.ok(Math.abs(r.pnl-1.84)<1e-9);
+});
+
+// ---------- v3.7: paper reprices like live ----------
+test('REGRESSION (paper no-fills): a stale signal price is repriced to the fresh ask and fills', async () => {
+  const h = await executorHarness(); // fresh ask is 0.52
+  let sent;
+  const orig = h.client.placeOrder;
+  h.client.placeOrder = async o => { sent = o; return orig(o); };
+  const r = await h.ex._executeSignal(signal({ priceDecimal: 0.50, priceCents: 50, closeTime: Date.now() + 600000 }), h.state, h.kalshiSkill, h.analytics);
+  assert.equal(sent.yes_price_dollars, '0.5200', 'limit is the fresh ask, not the 2-5s-old signal price');
+  assert.equal(r.status, 'executed');
+});
+
+test('paper skips (without a no-fill cooldown) when the fresh ask removes the edge', async () => {
+  const h = await executorHarness();
+  const r = await h.ex._executeSignal(signal({ modelProb: 0.58, closeTime: Date.now() + 600000 }), h.state, h.kalshiSkill, h.analytics);
+  assert.equal(r.status, 'blocked');
+  assert.match(r.reason, /^fresh_edge_below_min/);
+});
+
+test('PAPER+ uses its own lower execution edge floor', async () => {
+  const h = await executorHarness();
+  h.client.tradingMode = 'paper+';
+  const r = await h.ex._executeSignal(signal({ modelProb: 0.58, closeTime: Date.now() + 600000 }), h.state, h.kalshiSkill, h.analytics);
+  assert.equal(r.status, 'executed', '0.58 - 0.52 - 0.02 fee = 4% >= PAPER_PLUS_MIN_EDGE 3%');
 });

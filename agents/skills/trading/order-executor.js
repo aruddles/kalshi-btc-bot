@@ -91,9 +91,8 @@ class OrderExecutor extends BaseSkill {
 
           const noFillCooldown = this.noFillCooldowns.get(cooldownKey);
           if (noFillCooldown && noFillCooldown > Date.now()) {
-            const secs = Math.ceil((noFillCooldown - Date.now()) / 1000);
-            console.log(`[OrderExecutor] NO-FILL COOLDOWN: ${signal.ticker} ${signal.side} — retry suppressed for ${secs}s`);
-            results.push({ signal: signal.ticker, status: 'blocked', reason: 'no_fill_cooldown' });
+            // Logged once when the cooldown starts; repeating it every scan is noise.
+            results.push({ signal: signal.ticker, status: 'blocked', reason: 'no_fill_cooldown', quiet: true });
             continue;
           }
           if (noFillCooldown) this.noFillCooldowns.delete(cooldownKey);
@@ -177,14 +176,23 @@ class OrderExecutor extends BaseSkill {
       let executionPrice = Number(signal.priceDecimal);
       let executionContracts = Number(signal.contracts);
       let executionEdge = Number(signal.edge);
-      if (!client.isPaper) {
-        // The order book is authoritative for IOC execution. Kalshi's market
-        // summary can lag the matching engine enough to produce repeated 0-fill IOCs.
-        const bookResp = await client.get(`/trade-api/v2/markets/${signal.ticker}/orderbook?depth=20`);
-        const rawBook = bookResp.data?.orderbook_fp || bookResp.data?.orderbook || bookResp.data;
-        const quotes = executableQuotes(normalizeSnapshot(rawBook));
-        const askLevel = signal.side === 'yes' ? quotes?.yesAsk : quotes?.noAsk;
-        const freshAsk = Number(askLevel?.price);
+      {
+        let freshAsk;
+        if (client.isPaper) {
+          // Paper mode reprices exactly like live, from the same fresh market quote the
+          // PaperBroker fills against. Before v3.7 paper sent the 2-5s-old signal price,
+          // so it recorded IOC no-fills (and cooldowns) that live would not have.
+          const fresh = await client.fetchMarket(signal.ticker);
+          freshAsk = Number(signal.side === 'yes' ? fresh?.yesAsk : fresh?.noAsk);
+        } else {
+          // The order book is authoritative for IOC execution. Kalshi's market
+          // summary can lag the matching engine enough to produce repeated 0-fill IOCs.
+          const bookResp = await client.get(`/trade-api/v2/markets/${signal.ticker}/orderbook?depth=20`);
+          const rawBook = bookResp.data?.orderbook_fp || bookResp.data?.orderbook || bookResp.data;
+          const quotes = executableQuotes(normalizeSnapshot(rawBook));
+          const askLevel = signal.side === 'yes' ? quotes?.yesAsk : quotes?.noAsk;
+          freshAsk = Number(askLevel?.price);
+        }
         if (!Number.isFinite(freshAsk) || freshAsk <= 0 || freshAsk >= 1) {
           console.log(`[OrderExecutor] REPRICE SKIP: ${signal.ticker} ${signal.side} — fresh order-book ask unavailable`);
           return { signal: signal.ticker, status: 'blocked', reason: 'fresh_orderbook_ask_unavailable' };
@@ -195,7 +203,10 @@ class OrderExecutor extends BaseSkill {
         const feePerContract = estimateTakerFeeDollars(freshAsk, 1, feeRate, feeMultiplier);
         const netEv = expectedValuePerContract(Number(signal.modelProb), freshAsk, feePerContract);
         executionEdge = netEv * 100;
-        const minExecutionEdge = Number(this.context.config.MIN_EDGE ?? 10);
+        // Same floor as live; PAPER+ keeps its deliberately lower experimental floor.
+        const minExecutionEdge = client.tradingMode === 'paper+'
+          ? Number(this.context.config.PAPER_PLUS_MIN_EDGE ?? 3)
+          : Number(this.context.config.MIN_EDGE ?? 10);
 
         const affordableByPosition = Math.floor(Number(this.maxPositionSize) / (freshAsk + feePerContract));
         const affordableByBalance = Math.floor(Number(state.balance.available || 0) / (freshAsk + feePerContract));
