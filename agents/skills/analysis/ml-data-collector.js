@@ -175,6 +175,9 @@ class MLDataCollector extends BaseSkill {
           final_window_samples: live.settle ? live.settle.observedSamples : null,
           kalshi_yes_ask: market.yesAsk ?? null,
           kalshi_yes_bid: market.yesBid ?? null,
+          // Top-of-book sizes (contracts). NO bid size = YES ask size and vice versa.
+          kalshi_yes_bid_size: Number.isFinite(market.yesBidSize) ? market.yesBidSize : null,
+          kalshi_yes_ask_size: Number.isFinite(market.yesAskSize) ? market.yesAskSize : null,
           time_remaining_s: Math.max(0, (market.closeTime - now) / 1000),
         },
       });

@@ -78,7 +78,7 @@ test('V3.1 collector uses live per-market volatility/trend instead of frozen sta
     const hist = []; for (let i = -60; i < 0; i++) hist.push({ timestamp: open + i * 1000, price: 100000 });
     const feed = { priceHistory: hist, getRecentVolatility: () => 0.0042 };
     const state = {
-      activeMarkets: [{ ticker: 'T', openTime: open, closeTime: close, yesAsk: .55, noAsk: .46, yesBid: .54, noBid: .45, floorStrike: 99990 }],
+      activeMarkets: [{ ticker: 'T', openTime: open, closeTime: close, yesAsk: .55, noAsk: .46, yesBid: .54, noBid: .45, yesBidSize: 12, floorStrike: 99990 }],
       btcPrice: { binance: 100050 }, marketOpenPrices: { T: 100000 },
       model: { impliedProbUp: .9, volatility: .001, trend: 'BEARISH', trendStrength: .1, trendROC: -1 },
       stats: {}, balance: {},
@@ -97,6 +97,8 @@ test('V3.1 collector uses live per-market volatility/trend instead of frozen sta
     assert.notEqual(v[8], .9);                   // model_prob recomputed for this market
     assert.equal(rows[0].collectorMeta.collector_version, 'live-collector-v3.1');
     assert.equal(rows[0].collectorMeta.floor_strike, 99990);
+    assert.equal(rows[0].collectorMeta.kalshi_yes_bid_size, 12);
+    assert.equal(rows[0].collectorMeta.kalshi_yes_ask_size, null);
     assert.ok(rows[0].collectorMeta.settlement_p > 0.5);
   } finally { supabase.enabled = oldEnabled; supabase.logFeatures = oldLog; }
 });
