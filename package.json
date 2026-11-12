@@ -18,6 +18,8 @@
     "capture:replay": "node scripts/replay-kalshi-capture.js",
     "capture:simulate": "node scripts/simulate-kalshi-capture.js",
     "lag:study": "node scripts/lag-study.js",
+    "capture:lean": "CAPTURE_LEAN=true CAPTURE_DURATION_MINUTES=360 node scripts/capture-kalshi-history.js",
+    "capture:forever": "bash -c 'while true; do CAPTURE_LEAN=true CAPTURE_DURATION_MINUTES=360 node scripts/capture-kalshi-history.js; echo \"[capture] restarting in 5s (Ctrl-C to quit)\"; sleep 5; done'",
     "historical:ml": "node scripts/build-historical-ml-dataset.js",
     "historical:score": "node scripts/score-historical.js",
     "historical:retrain": "node scripts/retrain-historical.js",

@@ -11,12 +11,14 @@ const readline = require('readline');
 const { analyze } = require('../lib/lag-study');
 
 function arg(name, def) { const i = process.argv.indexOf(`--${name}`); return i >= 0 ? process.argv[i + 1] : def; }
-const KEEP = new Set(['usd_reference_quote', 'derived_quote', 'market_metadata', 'market_settlement', 'sequence_gap', 'kalshi_ws']);
+const KEEP = new Set(['usd_reference_quote', 'cf_index', 'derived_quote', 'market_metadata', 'market_settlement', 'sequence_gap', 'kalshi_ws']);
+const zlib = require('zlib');
 
 async function readEvents(files) {
   const events = [];
   for (const f of files) {
-    const rl = readline.createInterface({ input: fs.createReadStream(f), crlfDelay: Infinity });
+    const raw = fs.createReadStream(f);
+    const rl = readline.createInterface({ input: f.endsWith('.gz') ? raw.pipe(zlib.createGunzip()) : raw, crlfDelay: Infinity });
     for await (const line of rl) {
       if (!line) continue;
       let e;
@@ -38,10 +40,11 @@ async function readEvents(files) {
     const argv = process.argv.slice(2);
     const positional = argv.filter((a, i) => !a.startsWith('--') && !(argv[i - 1] || '').startsWith('--'));
     const dir = 'data/captures';
-    const files = positional.length ? positional : (fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).map(f => path.join(dir, f)) : []);
+    const files = positional.length ? positional : (fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => f.endsWith('.jsonl') || f.endsWith('.jsonl.gz')).map(f => path.join(dir, f)) : []);
     if (!files.length) throw new Error('No capture files. Record with: npm run capture:markets');
     const opts = {};
     if (arg('jump-usd')) opts.jumpUsd = Number(arg('jump-usd'));
+    if (arg('btc')) opts.btcSource = arg('btc'); // 'composite' (primary, default) or 'cf' (secondary)
     const r = analyze(await readEvents(files), opts);
     const out = arg('out', 'data/lag-study/summary.json');
     fs.mkdirSync(path.dirname(out), { recursive: true });
@@ -63,6 +66,7 @@ async function readEvents(files) {
     console.log(`\nCross-correlation of 1s changes (BTC now vs Kalshi mid k seconds later): ${xc.map(x => `${x.lagSec}s:${x.corr.toFixed(2)}`).join(' ') || '--'}`);
     const best = [...xc].sort((a, b) => b.corr - a.corr)[0];
     if (best) console.log(`Peak at ${best.lagSec}s (${best.corr.toFixed(2)}). A peak above 0s means Kalshi follows BTC by about that many seconds.`);
+    console.log(`\nSTATUS (${r.btcSource} BTC): ${r.status} — ${r.gate.events}/${r.gate.minEvents} events, ${r.gate.markets}/${r.gate.minMarkets} markets`);
     console.log(`\nSummary: ${out}`);
   } catch (e) {
     console.error(`[LagStudy] ${e.message}`);

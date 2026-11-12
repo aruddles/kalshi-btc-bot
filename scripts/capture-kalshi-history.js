@@ -14,15 +14,23 @@ const seriesTicker = process.env.CAPTURE_SERIES_TICKER || process.env.SERIES_TIC
 const binanceSymbol = (process.env.CAPTURE_BINANCE_SYMBOL || 'btcusdt').toLowerCase();
 // Coinbase/Kraken/Bitstamp top of book (BRTI proxy constituents) for lead-lag research.
 const captureUsdReference = process.env.CAPTURE_USD_REFERENCE !== 'false';
+// Lean mode (v3.9.3) for multi-day lag-study captures: gzip output, quote rows only when
+// best PRICES change (top-of-book only), no raw order-book deltas, no Binance ticks, plus
+// the official CF Benchmarks BRTI at up to 5 Hz. ~100x smaller than full mode.
+const lean = process.env.CAPTURE_LEAN === 'true';
+const captureCfIndex = process.env.CAPTURE_CF_INDEX !== 'false';
+const zlib = require('zlib');
 // derived_quote rows keep this many levels per side and are written only when the top of
 // book changes. Full depth is always recoverable by replaying the raw kalshi_ws deltas;
 // writing it on every delta (~460/s, ~19KB each) filled the 128MB budget in 15 seconds.
-const quoteDepth = Math.max(1, Number(process.env.CAPTURE_QUOTE_DEPTH) || 5);
+const quoteDepth = Math.max(1, Number(process.env.CAPTURE_QUOTE_DEPTH) || (lean ? 1 : 5));
 const lastTopOfBook = new Map();
 function writeDerivedQuote(ticker, seq, sourceTs, receivedAt) {
   const q = executableQuotes(bookStates.get(ticker));
   if (!q) return;
-  const top = JSON.stringify([q.yesBid, q.yesAsk, q.noBid, q.noAsk]);
+  const top = lean
+    ? JSON.stringify([q.yesBid?.price, q.yesAsk?.price, q.noBid?.price, q.noAsk?.price])
+    : JSON.stringify([q.yesBid, q.yesAsk, q.noBid, q.noAsk]);
   if (lastTopOfBook.get(ticker) === top) return;
   lastTopOfBook.set(ticker, top);
   const cut = levels => levels.slice(0, quoteDepth);
@@ -34,7 +42,7 @@ let usdReference = null;
 const intervalMs = Math.max(1000, Number(process.env.CAPTURE_DISCOVERY_INTERVAL_MS || 10000));
 const outputDir = path.resolve(process.env.CAPTURE_OUTPUT_DIR || './data/captures');
 const stopAfterMinutes = Number(process.env.CAPTURE_DURATION_MINUTES || 0);
-const requestedMaxBytes = Number(process.env.CAPTURE_MAX_BYTES || 128 * 1024 * 1024);
+const requestedMaxBytes = Number(process.env.CAPTURE_MAX_BYTES || (lean ? 4096 : 128) * 1024 * 1024); // uncompressed bytes
 const reserveBytes = Number(process.env.CAPTURE_DISK_RESERVE_BYTES || 64 * 1024 * 1024);
 const maxQueuedBytes = Number(process.env.CAPTURE_MAX_QUEUED_BYTES || 4 * 1024 * 1024);
 const startTime = Date.now();
@@ -57,8 +65,13 @@ try { client.loadPrivateKey(); } catch (error) {
 
 fs.mkdirSync(outputDir, { recursive: true });
 const runId = new Date().toISOString().replace(/[:.]/g, '-');
-const outputPath = path.join(outputDir, `kalshi-${seriesTicker}-${runId}.jsonl`);
-const output = fs.createWriteStream(outputPath, { flags: 'wx' });
+const outputPath = path.join(outputDir, `kalshi-${seriesTicker}-${runId}${lean ? '-lean.jsonl.gz' : '.jsonl'}`);
+const fileStream = fs.createWriteStream(outputPath, { flags: 'wx' });
+const output = lean ? zlib.createGzip({ level: 6 }) : fileStream;
+if (lean) {
+  output.pipe(fileStream);
+  fileStream.on('error', error => output.emit('error', error));
+}
 const requestedBudget = Number.isFinite(requestedMaxBytes) && requestedMaxBytes > 0
   ? requestedMaxBytes : 128 * 1024 * 1024;
 const diskReserve = Number.isFinite(reserveBytes) && reserveBytes >= 0
@@ -115,7 +128,8 @@ function resumeFeeds() {
 function finishOutputIfReady() {
   if (!finishRequested || outputEnded || outputFailed || outputBlocked || writeQueue.length) return;
   outputEnded = true;
-  output.end(() => console.log(`Capture saved: ${outputPath}`));
+  if (lean) fileStream.once('finish', () => console.log(`Capture saved: ${outputPath}`));
+  output.end(() => { if (!lean) console.log(`Capture saved: ${outputPath}`); });
 }
 
 function flushOutputQueue() {
@@ -225,6 +239,7 @@ function connectKalshi() {
     kalshiRetryMs = 1000;
     writeEvent('connection', { service: 'kalshi', status: 'connected', url: wsUrl() });
     subscriptions.setSocket(kalshiWs);
+    if (captureCfIndex) kalshiWs.send(JSON.stringify({ id: nextCommandId++, cmd: 'subscribe', params: { channels: ['cfbenchmarks_value_5hz'], index_ids: ['BRTI'] } }));
   });
   kalshiWs.on('message', raw => {
     const receivedAt = Date.now();
@@ -258,6 +273,16 @@ function connectKalshi() {
       }
       if (Number.isInteger(message.seq)) lastSequences.set(message.sid, message.seq);
       if (bookStates.has(ticker)) writeDerivedQuote(ticker, message.seq, message.msg?.ts_ms || null, receivedAt);
+    }
+    if (message.type === 'cfbenchmarks_value_5hz') {
+      const v = Number(message.msg?.value_usd);
+      if (v > 0) writeEvent('cf_index', { index_id: message.msg?.index_id, value: v, kalshi_received_at: message.msg?.received_at ?? null }, Number(message.msg?.source_ts_ms) || null, receivedAt);
+      return;
+    }
+    if (lean && (message.type === 'orderbook_delta' || message.type === 'orderbook_snapshot')) {
+      // Lean: keep only a resync marker (the lag study uses it to clear sequence-gap invalidation).
+      if (message.type === 'orderbook_snapshot' && ticker) writeEvent('kalshi_ws', { type: 'orderbook_snapshot', msg: { market_ticker: ticker } }, null, receivedAt);
+      return;
     }
     const sourceTs = Number(message.msg?.ts_ms) || (message.msg?.created_time ? Date.parse(message.msg.created_time) : null);
     writeEvent('kalshi_ws', message, Number.isFinite(sourceTs) ? sourceTs : null, receivedAt);
@@ -296,7 +321,7 @@ function connectBinance() {
       binancePrices.push({ sourceTsMs: sourceTs, bid, ask });
       const oldest = receivedAt - 120000;
       binancePrices = binancePrices.filter(item => item.sourceTsMs >= oldest).slice(-5000);
-      writeEvent('binance_book_ticker', quote, sourceTs, receivedAt);
+      if (!lean) writeEvent('binance_book_ticker', quote, sourceTs, receivedAt);
     } catch (error) {
       writeEvent('parse_error', { service: 'binance', error: error.message }, null, receivedAt);
     }
@@ -390,7 +415,7 @@ async function main() {
   console.log('Data-only: this process has no order-placement or cancellation calls. Press Ctrl+C to stop.');
   process.on('SIGINT', () => stopCapture('requested'));
   process.on('SIGTERM', () => stopCapture('requested'));
-  writeEvent('capture_started', { series_ticker: seriesTicker, binance_symbol: binanceSymbol, usd_reference: captureUsdReference, interval_ms: intervalMs });
+  writeEvent('capture_started', { series_ticker: seriesTicker, binance_symbol: binanceSymbol, usd_reference: captureUsdReference, interval_ms: intervalMs, lean, cf_index: captureCfIndex });
   if (stopping) return;
   connectKalshi();
   connectBinance();
