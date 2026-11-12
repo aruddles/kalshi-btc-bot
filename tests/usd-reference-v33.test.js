@@ -117,6 +117,69 @@ test('markets whose pre-open minute was not observed are skipped', () => {
   assert.equal(tr.summary().markets, 0);
 });
 
+test('a market is recorded when only the composite feed covers the pre-open minute', () => {
+  const tr = new R.StrikeTracker();
+  const added = tr.observe([{ ticker: 'Y', openTime: 5_000_000, floorStrike: 70000 }],
+    { reference: flat(70005, 4_940_000, 5_000_000), binance: flat(70040, 4_990_000, 5_000_000), now: 5_010_000 });
+  assert.equal(added, 1);
+  const s = tr.summary();
+  assert.equal(s.markets, 1);
+  assert.equal(s.recent[0].binanceError, null, 'too few Binance samples: recorded as missing, not dropped');
+  assert.equal(s.binance, null);
+  assert.ok(Math.abs(s.reference.medianError - 5) < 1e-6);
+});
+
+test('strike tracker survives a JSON round trip (restart)', () => {
+  const tr = new R.StrikeTracker();
+  const markets = [];
+  let reference = [];
+  for (let i = 0; i < 22; i++) {
+    const open = 10_000_000 + i * 900_000;
+    markets.push({ ticker: `M${i}`, openTime: open, floorStrike: 70000 });
+    reference = reference.concat(flat(70004, open - 60000, open));
+  }
+  const now = 10_000_000 + 22 * 900_000;
+  tr.observe(markets, { reference, binance: [], now });
+  const restored = R.StrikeTracker.fromJSON(JSON.parse(JSON.stringify(tr)));
+  assert.equal(restored.summary().markets, 22);
+  assert.ok(Math.abs(restored.referenceBias() - 4) < 1e-6, 'bias correction stays on after a restart');
+  assert.equal(restored.observe(markets, { reference, binance: [], now }), 0, 'already-measured markets are not measured again');
+  assert.equal(R.StrikeTracker.fromJSON({ version: 99, entries: [] }).summary().markets, 0, 'unknown format starts empty');
+  assert.equal(R.StrikeTracker.fromJSON(null).summary().markets, 0);
+});
+
+test('reference feed skill saves the strike tracker and reloads it on startup', async () => {
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'strike-tracker-'));
+  const file = path.join(dir, 'strike-tracker.json');
+  const old = process.env.STRIKE_TRACKER_FILE;
+  process.env.STRIKE_TRACKER_FILE = file;
+  try {
+    const Skill = require('../agents/skills/market-data/usd-reference-feed');
+    const open = Date.now() - 5000;
+    const markets = [{ ticker: 'P1', openTime: open, floorStrike: 70000 }];
+    const a = new Skill();
+    await a.initialize({ config: {} });
+    a.feed.priceHistory = flat(70002, open - 60000, open);
+    a.context.registry = { get: name => (name === 'state-manager' ? { botState: { activeMarkets: markets } } : null) };
+    a.observeMarkets();
+    assert.ok(fs.existsSync(file), 'saved as soon as a market is measured');
+
+    const b = new Skill();
+    await b.initialize({ config: {} });
+    assert.equal(b.tracker.summary().markets, 1, 'a restarted skill starts from the saved record');
+    assert.equal(b.tracker.summary().recent[0].ticker, 'P1');
+
+    fs.writeFileSync(file, '{not json');
+    const c = new Skill();
+    await c.initialize({ config: {} });
+    assert.equal(c.tracker.summary().markets, 0, 'a corrupt file starts empty instead of crashing');
+  } finally {
+    if (old === undefined) delete process.env.STRIKE_TRACKER_FILE; else process.env.STRIKE_TRACKER_FILE = old;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ---- probability against the official strike ----
 function fakeFeed(price, history = [], healthy = true) {
   return { isHealthy: () => healthy, getPrice: () => price, priceHistory: history, getRecentVolatility: () => 0.0015 };
