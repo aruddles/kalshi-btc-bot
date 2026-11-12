@@ -30,13 +30,20 @@ class MLSignalScorer extends BaseSkill {
     // Initialize Supabase connection
     supabase.initialize();
 
-    // Attempt to train from existing data
+    // Train from existing data in the BACKGROUND (v3.9). Training downloads every
+    // labeled row from Supabase and can take minutes; awaiting it here blocked every
+    // later skill, including the data collector, after each restart. ML scoring is
+    // shadow-only for the main bot, and the ML paper portfolios wait on
+    // mlPipeline.trainingInProgress, so nothing trades on a half-trained model.
+    this.trainingPromise = null;
     if (supabase.enabled) {
-      try {
-        await mlPipeline.train();
-      } catch (err) {
-        console.log(`[MLSignalScorer] Initial training skipped: ${err.message}`);
-      }
+      mlPipeline.trainingInProgress = true;
+      const t0 = Date.now();
+      this.trainingPromise = Promise.resolve()
+        .then(() => mlPipeline.train())
+        .then(() => console.log(`[MLSignalScorer] Background training finished in ${Math.round((Date.now() - t0) / 1000)}s`))
+        .catch(err => console.log(`[MLSignalScorer] Initial training skipped: ${err.message}`))
+        .finally(() => { mlPipeline.trainingInProgress = false; });
     }
   }
 
