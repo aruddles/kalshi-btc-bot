@@ -243,6 +243,23 @@ app.post('/api/bot/stop', controlOnly, (req, res) => {
   res.json({ status: 'stopped' });
 });
 
+// Restart the server process (reloads code). Requires the run-forever loop
+// (`npm run forever`) to come back up; without it this just stops the server.
+const restart = require('./lib/server-restart');
+const DATA_DIR = path.join(__dirname, 'data');
+app.post('/api/server/restart', controlOnly, (req, res) => {
+  const check = restart.canRestart(currentMode());
+  if (!check.ok) return res.status(409).json({ error: check.error });
+  restart.writeMarker(DATA_DIR, { running: agent.running, mode: currentMode() });
+  res.json({ status: 'restarting', resumeTrading: agent.running });
+  console.log('[Server] Restart requested from dashboard');
+  setTimeout(() => {
+    try { if (agent.state) agent.state.saveNow(); agent.stop(); } catch (err) { console.error('[Server] restart cleanup:', err.message); }
+    server.close();
+    process.exit(0);
+  }, 300);
+});
+
 app.get('/api/bot/status', (req, res) => {
   res.json({ running: agent.running, mode: currentMode() });
 });
@@ -390,8 +407,16 @@ server.listen(PORT, HOST, () => {
   console.log(`  Skills API: http://localhost:${PORT}/api/skills`);
   console.log(`  Config: ${config.SERIES_TICKER} | MinEdge=${config.MIN_EDGE}% | MinDiv=${config.MIN_DIVERGENCE}% | MaxPos=$${config.MAX_POSITION_SIZE}\n`);
 
-  // Bot does NOT auto-start — user controls via dashboard toggle
-  console.log('  Bot is IDLE. Use the dashboard toggle to start trading.\n');
+  // Bot does NOT auto-start — user controls via dashboard toggle —
+  // except right after a dashboard restart of a running PAPER/PAPER+ bot.
+  if (restart.consumeAutostart(DATA_DIR, currentMode())) {
+    console.log('  Restarted from dashboard: resuming trading.\n');
+    agent.start()
+      .then(() => { io.emit('bot:status', { running: true }); io.emit('bootstrap', dashboardBootstrap()); })
+      .catch((err) => { console.error('[Server] Bot auto-resume failed:', err.message); io.emit('bot:status', { running: false, error: err.message }); });
+  } else {
+    console.log('  Bot is IDLE. Use the dashboard toggle to start trading.\n');
+  }
 });
 
 // Graceful shutdown
