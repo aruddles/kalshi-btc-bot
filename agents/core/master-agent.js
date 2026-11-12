@@ -270,6 +270,7 @@ class MasterAgent extends EventEmitter {
       }
     }
 
+    require('../../lib/latency-monitor').monitor.start();
     this.log('All skills started');
 
     // Run startup workflow: fetch balance → reconcile positions → discover markets
@@ -361,6 +362,7 @@ class MasterAgent extends EventEmitter {
   async _runScan() {
     if (this._scanRunning || !this.running) return;
     this._scanRunning = true;
+    const _lm = require('../../lib/latency-monitor').monitor, _scanT0 = _lm.scanStarted();
 
     const state = this.state;
 
@@ -423,6 +425,7 @@ class MasterAgent extends EventEmitter {
     } catch (err) {
       this.log(`Scan error: ${err.message}`, 'ERROR');
     } finally {
+      _lm.record('scan_ms', Date.now() - _scanT0);
       this._scanRunning = false;
     }
   }

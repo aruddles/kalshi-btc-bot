@@ -260,6 +260,9 @@ app.post('/api/server/restart', controlOnly, (req, res) => {
   }, 300);
 });
 
+// Latency telemetry (diagnostic only).
+app.get('/api/latency', (req, res) => res.json(require('./lib/latency-monitor').monitor.summary()));
+
 // Main-bot panel + scorecard (display only).
 app.get('/api/main-bot', (req, res) => {
   try {

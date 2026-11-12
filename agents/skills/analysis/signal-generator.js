@@ -141,6 +141,11 @@ class SignalGenerator extends BaseSkill {
       // Skip a market whose latest refresh failed: its quotes are stale.
       if (market.refreshedAt !== undefined && now - market.refreshedAt > this.maxQuoteAgeMs) continue;
 
+      // Latency telemetry (diagnostic only): how old the BTC inputs are at decision time.
+      { const lm = require('../../../lib/latency-monitor').monitor;
+        if (state.btcPrice?.lastUpdate) lm.record('btc_age_ms', now - state.btcPrice.lastUpdate);
+        const refTs = feeds?.reference?.latest?.timestamp; if (refTs) lm.record('reference_age_ms', now - refTs); }
+
       // Opening and current price from the same feed (composite USD preferred, else Binance).
       const px = marketPriceInputs(market, state, feeds);
       if (!px) continue;

@@ -156,9 +156,11 @@ class KalshiMarketData extends BaseSkill {
     const markets = state.activeMarkets;
     if (markets.length === 0) return { markets: [], count: 0 };
 
+    const t0 = Date.now();
     const results = await Promise.allSettled(
       markets.map(m => this.client.fetchMarket(m.ticker))
     );
+    require('../../../lib/latency-monitor').monitor.record('kalshi_refresh_ms', Date.now() - t0);
 
     const refreshed = markets.map((m, i) => {
       if (results[i].status === 'fulfilled' && results[i].value) {
