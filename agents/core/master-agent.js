@@ -35,6 +35,7 @@ const TrendAnalysis = require('../skills/analysis/trend-analysis');
 const SignalGenerator = require('../skills/analysis/signal-generator');
 const MLSignalScorer = require('../skills/analysis/ml-signal-scorer');
 const MLDataCollector = require('../skills/analysis/ml-data-collector');
+const { snapshotSince } = require('../../lib/dashboard-since');
 
 // Trading Skills
 const RiskManager = require('../skills/trading/risk-manager');
@@ -435,10 +436,10 @@ class MasterAgent extends EventEmitter {
     for(const market of state.activeMarkets||[]){if(!market?.ticker||!market.closeTime||market.closeTime<=Date.now())continue;const modelProb=Number.isFinite(state.model?.impliedProbUp)?state.model.impliedProbUp:.5;const signal={type:'DIRECTIONAL_YES_SNAPSHOT',ticker:market.ticker,side:'yes',edge:(modelProb-(market.yesAsk||.5))*100,modelProb,priceCents:Math.round((market.yesAsk||.5)*100),contracts:0};const ctx=scorer._buildMarketContext(signal,state);const scored=await mlPipeline.scoreSignal(signal,ctx);const sh=mlPipeline.liveShadow||{},reg=sh.regime;if(!['EARLY','LATE','FINAL'].includes(reg))continue;const cp=Number.isFinite(sh.specialistProbability)?sh.specialistProbability:sh.calibratedProbability;const ch=sh.challenger||mlPipeline.challengers?.liveShadow||{};const hp=Number.isFinite(ch.challengerCalibratedProbability)?ch.challengerCalibratedProbability:null;arena.evaluate(`${reg}_CHAMPION`,market,cp);if(Number.isFinite(hp)){arena.evaluate(`${reg}_CHALLENGER`,market,hp);if(reg==='FINAL')lab?.evaluateSharedSnapshot({ticker:market.ticker,timestamp:Date.now(),closeTime:market.closeTime,modelProbability:hp,kalshiProbability:market.yesAsk,yesAsk:market.yesAsk,noAsk:market.noAsk,yesAskSize:market.yesAskSize,noAskSize:market.noAskSize,feeMultiplier:market.feeMultiplier,timeRemainingMs:Math.max(0,market.closeTime-Date.now())});}if(reg==='FINAL'&&b5?.model?.status!=='READY')b5?.reloadModel?.();if(reg==='FINAL'&&b5?.model?.status==='READY'){const f14=projectChallengerFeatures(scored?.features);const p5=f14?b5.predict(f14):null;if(Number.isFinite(p5))b5.evaluateSharedSnapshot({ticker:market.ticker,timestamp:Date.now(),closeTime:market.closeTime,modelProbability:p5,kalshiProbability:market.yesAsk,yesAsk:market.yesAsk,noAsk:market.noAsk,yesAskSize:market.yesAskSize,noAskSize:market.noAskSize,feeMultiplier:market.feeMultiplier,timeRemainingMs:Math.max(0,market.closeTime-Date.now())});}arena.recordComparison(reg,market.ticker);}
   }
 
-  getMlPaperSnapshot() { return this.modelArena?.snapshot(this.state?.activeMarkets || []) || null; }
-  getModelArenaSnapshot() { return this.modelArena?.snapshot(this.state?.activeMarkets || []) || null; }
-  getFinalSelectivitySnapshot() { return this.finalSelectivityLab?.snapshot(this.state?.activeMarkets || []) || null; }
-  getBaymax5kForwardSnapshot() { return this.baymax5kForward?.snapshot(this.state?.activeMarkets || []) || null; }
+  getMlPaperSnapshot() { return snapshotSince(this.modelArena, 'portfolios', this.state?.activeMarkets || []); }
+  getModelArenaSnapshot() { return snapshotSince(this.modelArena, 'portfolios', this.state?.activeMarkets || []); }
+  getFinalSelectivitySnapshot() { return snapshotSince(this.finalSelectivityLab, 'policies', this.state?.activeMarkets || []); }
+  getBaymax5kForwardSnapshot() { return snapshotSince(this.baymax5kForward, 'policies', this.state?.activeMarkets || []); }
 
   /**
    * Take-profit loop. Runs every 3 seconds for open positions.
