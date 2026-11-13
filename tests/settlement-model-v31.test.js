@@ -100,6 +100,13 @@ test('V3.1 collector uses live per-market volatility/trend instead of frozen sta
     assert.equal(rows[0].collectorMeta.kalshi_yes_bid_size, 12);
     assert.equal(rows[0].collectorMeta.kalshi_yes_ask_size, null);
     assert.ok(rows[0].collectorMeta.settlement_p > 0.5);
+    assert.equal(rows[0].collectorMeta.poly_up_lo, null);  // no Polymarket skill -> nulls, no crash
+    rows.length = 0;
+    skills['polymarket-price-feed'] = { getCachedPrice: ct => (ct === close ? { upBuy: .57, upSell: .55, slug: 'btc-updown-15m-x', fetchedAt: Date.now() - 1500 } : null) };
+    await c._collect();
+    const pm = rows[0].collectorMeta;
+    assert.equal(pm.poly_up_lo, .55); assert.equal(pm.poly_up_hi, .57); assert.equal(pm.poly_slug, 'btc-updown-15m-x');
+    assert.ok(pm.poly_age_ms >= 1500 && pm.poly_age_ms < 5000);
   } finally { supabase.enabled = oldEnabled; supabase.logFeatures = oldLog; }
 });
 

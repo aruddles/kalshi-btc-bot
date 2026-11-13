@@ -181,6 +181,7 @@ class MLDataCollector extends BaseSkill {
           reference_price: live.brti ? live.brti.referencePrice : null,
           reference_bias: live.brti ? live.brti.bias : null,
           ...this._cfMeta(now),
+          ...this._polyMeta(market, now),
           final_window_samples: live.settle ? live.settle.observedSamples : null,
           kalshi_yes_ask: market.yesAsk ?? null,
           kalshi_yes_bid: market.yesBid ?? null,
@@ -227,6 +228,22 @@ class MLDataCollector extends BaseSkill {
     if (!this.cfIndex) return {};
     const c = this.cfIndex.snapshot(now);
     return { cf_brti: c.value, cf_brti_age_ms: c.time ? now - c.time : null, cf_brti_avg60: c.avg60, cf_brti_avg60_n: c.avg60Samples, cf_error: c.error };
+  }
+
+  // Shadow-only cross-market data: the matching Polymarket "Bitcoin Up or Down" 15-minute
+  // market (resolves on the Chainlink BTC/USD stream, end vs start price — not CF BRTI).
+  // The CLOB /price "buy"/"sell" semantics are logged as lo/hi (min/max) so no bid/ask
+  // assumption is baked in. Never used for trading here.
+  _polyMeta(market, now) {
+    const poly = this.context.registry.get('polymarket-price-feed');
+    const d = poly?.getCachedPrice?.(market.closeTime);
+    const ok = d && [d.upBuy, d.upSell].every(Number.isFinite);
+    return {
+      poly_up_lo: ok ? Math.min(d.upBuy, d.upSell) : null,
+      poly_up_hi: ok ? Math.max(d.upBuy, d.upSell) : null,
+      poly_age_ms: d && Number.isFinite(d.fetchedAt) ? now - d.fetchedAt : null,
+      poly_slug: d?.slug ?? null,
+    };
   }
 
   async stop() {
