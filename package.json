@@ -8,6 +8,7 @@
     "kalshi-error-test": "node scripts/kalshi-error-test.js",
     "path-feature-test": "node scripts/path-feature-test.js",
     "exit-vs-hold": "node scripts/exit-vs-hold.js",
+    "quiet-hours": "node scripts/quiet-hours.js",
     "forever": "bash -c 'while true; do node -r dotenv/config server.js; echo \"[forever] server exited; restarting in 3s (Ctrl-C to quit)\"; sleep 3; done'",
     "dev": "node -r dotenv/config server.js",
     "backtest": "node backtest/backtest.js",
