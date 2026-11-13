@@ -439,10 +439,13 @@ server.listen(PORT, HOST, () => {
 });
 
 // Graceful shutdown
-process.on('SIGINT', () => {
+// SIGTERM is what launchd/systemd send on stop; save state the same way as Ctrl-C.
+function gracefulShutdown() {
   console.log('\n[Server] Shutting down...');
   if (agent.state) agent.state.saveNow();
   agent.stop();
   server.close();
   process.exit(0);
-});
+}
+process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', gracefulShutdown);
