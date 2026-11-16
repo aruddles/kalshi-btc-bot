@@ -36,3 +36,20 @@ test('break-even uses whole-run averages from gross totals, not the last-100 win
   assert.ok(out.luck.winRate < out.luck.breakevenWinRate);
   assert.ok(out.luck.luckChance > 0.5);
 });
+
+test('exit-vs-hold summary is cached until the log file changes', () => {
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ehc-')), 'exit.jsonl');
+  const row = i => JSON.stringify({ orderId: `o${i}`, ticker: `T${i % 50}`, pnl: 0.5, holdPnl: i % 3 ? 1 : -2, delta: 0.5 - (i % 3 ? 1 : -2) }) + '\n';
+  fs.writeFileSync(f, Array.from({ length: 320 }, (_, i) => row(i)).join(''));
+  const E = require('../lib/exit-hold-log');
+  const a = E.summarizeCached(f), b = E.summarizeCached(f);
+  assert.equal(a, b);                                  // same object: no recompute
+  assert.equal(a.exits, 320);
+  assert.ok(a.ci95);
+  assert.deepEqual(a, E.summarize(E.load(f)));         // identical to the uncached result
+  fs.appendFileSync(f, row(999));
+  const c = E.summarizeCached(f);
+  assert.notEqual(c, a);
+  assert.equal(c.exits, 321);
+});
