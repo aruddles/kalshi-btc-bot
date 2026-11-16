@@ -254,11 +254,19 @@ app.post('/api/server/restart', controlOnly, (req, res) => {
   res.json({ status: 'restarting', resumeTrading: agent.running });
   console.log('[Server] Restart requested from dashboard');
   setTimeout(() => {
-    try { if (agent.state) agent.state.saveNow(); flushLabs(); agent.stop(); } catch (err) { console.error('[Server] restart cleanup:', err.message); }
+    try { if (agent.state) agent.state.saveNow(); flushLabs(); stopCapture(); agent.stop(); } catch (err) { console.error('[Server] restart cleanup:', err.message); }
     server.close();
     process.exit(0);
   }, 300);
 });
+
+// Lean market-data capture for the lead-lag study (separate child process; data only).
+const captureSupervisor = new (require('./lib/capture-supervisor').CaptureSupervisor)();
+app.get('/api/capture', (req, res) => res.json(captureSupervisor.status()));
+app.post('/api/capture/start', controlOnly, (req, res) => {
+  try { res.json(captureSupervisor.start(req.body?.hours ?? 24)); } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/capture/stop', controlOnly, (req, res) => res.json(captureSupervisor.stop()));
 
 // Latency telemetry (diagnostic only).
 app.get('/api/latency', (req, res) => res.json(require('./lib/latency-monitor').monitor.summary()));
@@ -420,6 +428,7 @@ io.on('connection', (socket) => {
 
 // Start server, then agent
 server.listen(PORT, HOST, () => {
+  try { captureSupervisor.resume(); } catch (_) { /* data only */ }
   console.log(`\n  KALSHIBOT MISSION CONTROL (Agentic Architecture)`);
   console.log(`  Dashboard:  http://${HOST === '127.0.0.1' ? 'localhost' : HOST}:${PORT}`);
   console.log(`  Mode:       ${config.TRADING_MODE === 'live' ? '*** LIVE — REAL ORDERS ***' : (config.TRADING_MODE === 'paper+' ? 'PAPER+ (aggressive simulated strategy, no real orders)' : 'PAPER (simulated fills, no real orders)')}`);
@@ -441,6 +450,7 @@ server.listen(PORT, HOST, () => {
 // Graceful shutdown
 // SIGTERM is what launchd/systemd send on stop; save state the same way as Ctrl-C.
 // Research labs throttle their state writes; make sure nothing is pending at exit.
+function stopCapture() { try { captureSupervisor.stop({ keep: true }); } catch (_) { /* data only */ } }
 function flushLabs() {
   for (const lab of [agent.modelArena, agent.finalSelectivityLab, agent.baymax5kForward]) { try { lab?.flush?.(); } catch (_) { /* shadow state only */ } }
 }
@@ -449,6 +459,7 @@ function gracefulShutdown() {
   console.log('\n[Server] Shutting down...');
   if (agent.state) agent.state.saveNow();
   flushLabs();
+  stopCapture();
   agent.stop();
   server.close();
   process.exit(0);
