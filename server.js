@@ -254,7 +254,7 @@ app.post('/api/server/restart', controlOnly, (req, res) => {
   res.json({ status: 'restarting', resumeTrading: agent.running });
   console.log('[Server] Restart requested from dashboard');
   setTimeout(() => {
-    try { if (agent.state) agent.state.saveNow(); agent.stop(); } catch (err) { console.error('[Server] restart cleanup:', err.message); }
+    try { if (agent.state) agent.state.saveNow(); flushLabs(); agent.stop(); } catch (err) { console.error('[Server] restart cleanup:', err.message); }
     server.close();
     process.exit(0);
   }, 300);
@@ -440,9 +440,15 @@ server.listen(PORT, HOST, () => {
 
 // Graceful shutdown
 // SIGTERM is what launchd/systemd send on stop; save state the same way as Ctrl-C.
+// Research labs throttle their state writes; make sure nothing is pending at exit.
+function flushLabs() {
+  for (const lab of [agent.modelArena, agent.finalSelectivityLab, agent.baymax5kForward]) { try { lab?.flush?.(); } catch (_) { /* shadow state only */ } }
+}
+
 function gracefulShutdown() {
   console.log('\n[Server] Shutting down...');
   if (agent.state) agent.state.saveNow();
+  flushLabs();
   agent.stop();
   server.close();
   process.exit(0);
