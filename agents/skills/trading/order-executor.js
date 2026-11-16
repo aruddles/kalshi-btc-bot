@@ -12,6 +12,7 @@ const OrderManager = require('../../../bot/order-manager');
 const { formatPrice } = require('../../../lib/kalshi-format');
 const { estimateTakerFeeDollars, expectedValuePerContract } = require('../../../lib/kalshi-economics');
 const { normalizeSnapshot, executableQuotes } = require('../../../lib/kalshi-orderbook');
+const fillAudit = require('../../../lib/fill-audit');
 const supabase = require('../../../lib/supabase');
 
 class OrderExecutor extends BaseSkill {
@@ -178,20 +179,18 @@ class OrderExecutor extends BaseSkill {
       let executionEdge = Number(signal.edge);
       {
         let freshAsk;
-        if (client.isPaper) {
-          // Paper mode reprices exactly like live, from the same fresh market quote the
-          // PaperBroker fills against. Before v3.7 paper sent the 2-5s-old signal price,
-          // so it recorded IOC no-fills (and cooldowns) that live would not have.
-          const fresh = await client.fetchMarket(signal.ticker);
-          freshAsk = Number(signal.side === 'yes' ? fresh?.yesAsk : fresh?.noAsk);
-        } else {
-          // The order book is authoritative for IOC execution. Kalshi's market
-          // summary can lag the matching engine enough to produce repeated 0-fill IOCs.
+        {
+          // The order book is authoritative for execution in every mode. Kalshi's market
+          // summary can lag the matching engine by seconds: live got 0-fill IOCs from it,
+          // and paper (which used it until 2026-11-16) filled at prices that were gone.
           const bookResp = await client.get(`/trade-api/v2/markets/${signal.ticker}/orderbook?depth=20`);
-          const rawBook = bookResp.data?.orderbook_fp || bookResp.data?.orderbook || bookResp.data;
-          const quotes = executableQuotes(normalizeSnapshot(rawBook));
+          const quotes = executableQuotes(normalizeSnapshot(bookResp.data?.orderbook_fp || bookResp.data?.orderbook || bookResp.data));
           const askLevel = signal.side === 'yes' ? quotes?.yesAsk : quotes?.noAsk;
           freshAsk = Number(askLevel?.price);
+          const summaryAsk = Number(signal.side === 'yes' ? market?.yesAsk : market?.noAsk);
+          fillAudit.append({ ts: new Date().toISOString(), ticker: signal.ticker, side: signal.side, mode: client.tradingMode,
+            signalAsk: Number(signal.priceDecimal), summaryAsk: Number.isFinite(summaryAsk) ? summaryAsk : null, bookAsk: Number.isFinite(freshAsk) ? freshAsk : null,
+            signalEdge: Number(signal.edge) });
         }
         if (!Number.isFinite(freshAsk) || freshAsk <= 0 || freshAsk >= 1) {
           console.log(`[OrderExecutor] REPRICE SKIP: ${signal.ticker} ${signal.side} — fresh order-book ask unavailable`);

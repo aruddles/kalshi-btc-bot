@@ -19,6 +19,8 @@ const rawMarket = {
   yes_bid_dollars: '0.4800', yes_ask_dollars: '0.5200', no_bid_dollars: '0.4800', no_ask_dollars: '0.5200',
   yes_bid_size_fp: '100.00', yes_ask_size_fp: '40.00',
 };
+// Order book with best YES bid and best NO bid (YES ask = 1 - NO bid).
+const book = (yesBid, noBid, size = '40.00') => ({ orderbook_fp: { yes_dollars: [[yesBid.toFixed(4), size]], no_dollars: [[noBid.toFixed(4), size]] } });
 const buy = (o = {}) => ({ ticker: 'T', action: 'buy', side: 'yes', count: 3, type: 'limit', time_in_force: 'immediate_or_cancel', yes_price_dollars: '0.5200', client_order_id: 'c', ...o });
 
 function liveClient(extra = {}) {
@@ -42,7 +44,7 @@ test('default mode is PAPER and nothing is posted', async () => {
   assert.equal(c.tradingMode, 'paper');
   assert.ok(c.isPaper);
   c.post = async () => { throw new Error('paper mode must not POST'); };
-  c.get = async () => ({ data: { market: rawMarket } });
+  c.get = async path => (path.includes('/orderbook') ? { data: book(0.48, 0.48) } : { data: { market: rawMarket } });
   const o = await c.placeOrder(buy());
   assert.equal(o.fill_count, 3);
   assert.ok(String(o.order_id).startsWith('paper-'));
@@ -157,4 +159,29 @@ test('runtime mode switching keeps paper+ simulated and only exact live disables
   assert.equal(c.tradingMode, 'paper');
   assert.equal(c.isPaper, true);
   assert.ok(c.paper);
+});
+
+test('PAPER fills against the order book, not the lagging market summary', async () => {
+  // Summary still shows YES ask 0.52; the real book has already moved to 0.70 (best NO bid 0.30).
+  const moved = new KalshiClient({ KALSHI_API_KEY: 'k' }, {});
+  moved.get = async path => (path.includes('/orderbook') ? { data: book(0.69, 0.30) } : { data: { market: rawMarket } });
+  const missed = await moved.placeOrder(buy());               // limit 0.52 < real ask 0.70
+  assert.equal(missed.fill_count, 0);
+  assert.equal(missed.status, 'canceled');
+  const paid = await moved.placeOrder(buy({ yes_price_dollars: '0.7000' }));
+  assert.equal(paid.fill_count, 3);
+  assert.equal(paid.average_fill_price, 0.7);                  // filled at the book ask
+  const m = await moved.fetchExecutableMarket('T');
+  assert.equal(m.quoteSource, 'orderbook');
+  assert.equal(m.summaryQuotes.yesAsk, 0.52);                  // old view kept for auditing
+});
+
+test('PAPER: no order book means no fill (never falls back to the summary)', async () => {
+  const c = new KalshiClient({ KALSHI_API_KEY: 'k' }, {});
+  c.get = async path => { if (path.includes('/orderbook')) throw new Error('book down'); return { data: { market: rawMarket } }; };
+  const o = await c.placeOrder(buy());
+  assert.equal(o.fill_count, 0);
+  const empty = new KalshiClient({ KALSHI_API_KEY: 'k' }, {});
+  empty.get = async path => (path.includes('/orderbook') ? { data: { orderbook_fp: { yes_dollars: [], no_dollars: [] } } } : { data: { market: rawMarket } });
+  assert.equal((await empty.placeOrder(buy())).fill_count, 0);
 });

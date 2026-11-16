@@ -7,7 +7,7 @@ const {
 } = require('../lib/kalshi-format');
 const { PaperBroker } = require('../lib/paper-broker');
 const { TradingGuard, TradingBlockedError } = require('../lib/trading-guard');
-const { normalizeSnapshot, executableQuotes } = require('../lib/kalshi-orderbook');
+const { normalizeSnapshot, executableQuotes, overlayExecutable } = require('../lib/kalshi-orderbook');
 
 const V2_ORDERS_PATH = '/trade-api/v2/portfolio/events/orders';
 const LEGACY_ORDERS_PATH = '/trade-api/v2/portfolio/orders';
@@ -173,6 +173,18 @@ class KalshiClient {
     }
   }
 
+  /** Executable top-of-book straight from the order book (not the lagging market summary). */
+  async fetchBookQuotes(ticker) {
+    const resp = await this.get(`/trade-api/v2/markets/${ticker}/orderbook?depth=20`);
+    return executableQuotes(normalizeSnapshot(resp.data?.orderbook_fp || resp.data?.orderbook || resp.data));
+  }
+
+  /** Market summary with its quotes replaced by the order book's. Null if either is unavailable. */
+  async fetchExecutableMarket(ticker) {
+    const [market, quotes] = await Promise.all([this.fetchMarket(ticker), this.fetchBookQuotes(ticker)]);
+    return overlayExecutable(market, quotes);
+  }
+
   /**
    * Place an order described in the bot's internal shape:
    *   { ticker, action: 'buy'|'sell', side: 'yes'|'no', count,
@@ -192,8 +204,12 @@ class KalshiClient {
     }
 
     if (this.paper) {
-      // Match against a FRESH book, as a real order would see.
-      const market = await this.fetchMarket(spec.ticker);
+      // Match against the live ORDER BOOK, as a real order would. The market summary
+      // can lag by seconds in fast moves and filled paper orders at prices that were gone.
+      // No book = no fill.
+      let market = null;
+      try { market = await this.fetchExecutableMarket(spec.ticker); }
+      catch (e) { if (e instanceof TradingBlockedError) throw e; console.warn(`[KalshiClient] paper fill skipped, order book unavailable: ${e.message}`); }
       return this.paper.place(spec, market);
     }
 

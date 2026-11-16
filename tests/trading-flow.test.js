@@ -299,7 +299,9 @@ async function executorHarness({ fillSize = 100 } = {}) {
       return paper.place(specFromOrderData(o), marketNow);
     },
     getOrder: async id => paper.get(id),
-    fetchMarket: async () => marketNow, // paper reprices from the same quote the broker fills against
+    fetchMarket: async () => marketNow,
+    // Paper reprices from the order book, exactly like live: YES ask 0.52 is implied by the best NO bid 0.48.
+    get: async () => ({ data: { orderbook_fp: { yes_dollars_fp: [['0.4800', '100']], no_dollars_fp: [['0.4800', '100']] } } }),
     fetchBalance: async () => paper.balance(),
     recordSettlement: (t, r) => paper.settle(t, r),
   };
