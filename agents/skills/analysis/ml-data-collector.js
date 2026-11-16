@@ -12,6 +12,7 @@ const mlPipeline = require('../../../lib/ml-pipeline');
 const supabase = require('../../../lib/supabase');
 const { settlementProbabilityForMarket } = require('../../../lib/settlement-model');
 const { CfIndexPoller } = require('../../../lib/cf-index');
+const marketContext = require('../../../lib/market-context');
 const { feedsFrom, marketPriceInputs } = require('../../../lib/market-prices');
 
 // v3.1: volatility/trend/model_prob are computed per market at snapshot time.
@@ -52,6 +53,14 @@ class MLDataCollector extends BaseSkill {
         const client = this.context.registry.get('kalshi-market-data')?.getClient?.();
         if (client) { this.cfIndex = new CfIndexPoller({ client }); this.cfIndex.start(); }
       } catch (err) { console.warn('[MLCollector] CF index feed not started:', err.message); }
+    }
+    // Shadow market context (exchange order flow, Deribit, Kalshi depth/tape): log-only.
+    if (String(this.context?.config?.MARKET_CONTEXT_ENABLED ?? process.env.MARKET_CONTEXT_ENABLED ?? 'true') !== 'false') {
+      try {
+        const client = this.context.registry.get('kalshi-market-data')?.getClient?.();
+        this.marketContext = new marketContext.MarketContext({ client });
+        this.marketContext.start();
+      } catch (err) { console.warn('[MLCollector] market context feeds not started:', err.message); }
     }
     await this._recoverPendingTickers();
     this.interval = setInterval(() => this._tick().catch(err => {
@@ -159,6 +168,7 @@ class MLDataCollector extends BaseSkill {
       const vector = mlPipeline.extractFeatures(signal, this._marketContext(market, state, live));
       const bucket = Math.floor(now / this.cadenceMs) * this.cadenceMs;
       const observationId = `market:${market.ticker}:${bucket}`;
+      this._logContext(market, live, bucket, now);
 
       await supabase.logFeatures({
         observationId,
@@ -224,6 +234,23 @@ class MLDataCollector extends BaseSkill {
     return { labeledMarkets };
   }
 
+  // One line per snapshot in data/market-context.jsonl (joins to ml_features on ts + ticker).
+  _logContext(market, live, bucket, now) {
+    if (!this.marketContext) return;
+    try {
+      this.marketContext.track(market.ticker, market.closeTime);
+      marketContext.append({
+        ts: new Date(bucket).toISOString(), ticker: market.ticker,
+        t_rem: Math.round(Math.max(0, (market.closeTime - now) / 1000)),
+        k_yb: market.yesBid ?? null, k_ya: market.yesAsk ?? null,
+        strike: Number.isFinite(market.floorStrike) ? market.floorStrike : null,
+        ref: live.brti ? live.brti.referencePrice : null,
+        cf: this.cfIndex ? this.cfIndex.snapshot(now).value : null,
+        ...this.marketContext.snapshot(market.ticker, now),
+      });
+    } catch (err) { /* shadow data only */ }
+  }
+
   _cfMeta(now) {
     if (!this.cfIndex) return {};
     const c = this.cfIndex.snapshot(now);
@@ -248,6 +275,7 @@ class MLDataCollector extends BaseSkill {
 
   async stop() {
     this.cfIndex?.stop();
+    this.marketContext?.stop();
     if (this.interval) clearInterval(this.interval);
     this.interval = null;
     await super.stop();
