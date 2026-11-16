@@ -25,3 +25,14 @@ test('summary shapes panel data and scorecard', () => {
   assert.equal(s.checks[1].state, 'pending');
   assert.equal(s.checks[3].detail, '11 / 300 early sells');
 });
+
+test('break-even uses whole-run averages from gross totals, not the last-100 window', () => {
+  const { summarize } = require('../lib/main-bot-summary');
+  // Real numbers at 797 trades: last-100 averages said 0.371 / -1.245 (break-even 77%).
+  const st = { totalTrades: 797, wins: 644, losses: 153, totalPnL: -15.75, grossWins: 312.44, grossLosses: 328.64,
+    avgWinningTrade: 0.371, avgLosingTrade: -1.245, startTime: Date.parse('2026-11-10T10:41:09Z') };
+  const out = summarize({ stats: st });
+  assert.ok(Math.abs(out.luck.breakevenWinRate - 0.8157) < 0.001, String(out.luck.breakevenWinRate));
+  assert.ok(out.luck.winRate < out.luck.breakevenWinRate);
+  assert.ok(out.luck.luckChance > 0.5);
+});
