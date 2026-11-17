@@ -80,3 +80,12 @@ test('markPosition: values an open position at the bid on its own side', () => {
   const gone = M.markPosition({ ticker: 'Z', side: 'yes', priceCents: 50, contracts: 1, totalCost: 0.5 }, m, 1000);
   assert.equal(gone.unrealized, null);
 });
+
+test('"Better probabilities than Kalshi" reads the market comparison, not the model-vs-model one', () => {
+  const settlement = { primary: { status: 'BRTI_BETTER_THAN_GBM', markets: 425, minMarkets: 200 },
+    brtiProxy: { markets: 442, brierDiff: { BRTI_minus_KALSHI: { low: 0.0036, high: 0.0114 } } } };
+  const c = M.summarize({ stats: { totalTrades: 10 }, settlement }).checks.find(x => x.name === 'Better probabilities than Kalshi');
+  assert.equal(c.state, 'fail');
+  assert.match(c.detail, /Kalshi is more accurate/);
+  assert.equal(M.summarize({ stats: {} }).checks.find(x => x.name === 'Better probabilities than Kalshi').state, 'pending');
+});
