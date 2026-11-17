@@ -278,13 +278,34 @@ app.get('/api/main-bot', (req, res) => {
     // One-line research total (since the dashboard cutoff), for the collapsed section.
     const D = require('./lib/dashboard-since'), since = D.sinceMs();
     let bots = 0, trades = 0, pnl = 0, positive = 0;
-    for (const set of [agent.modelArena?.portfolios, agent.finalSelectivityLab?.policies, agent.baymax5kForward?.policies]) {
-      for (const p of Object.values(set || {})) { const v = D.viewSince(p, since); bots++; trades += v.trades.length; pnl += v.realizedPnl; if (v.realizedPnl > 0) positive++; }
+    const rows = [];
+    for (const [group, set] of [['Arena', agent.modelArena?.portfolios], ['Final lab', agent.finalSelectivityLab?.policies], ['Baymax 5K', agent.baymax5kForward?.policies]]) {
+      for (const [id, p] of Object.entries(set || {})) {
+        const v = D.viewSince(p, since); bots++; trades += v.trades.length; pnl += v.realizedPnl; if (v.realizedPnl > 0) positive++;
+        const wins = v.trades.filter(t => t.won).length;
+        rows.push({ id, group, trades: v.trades.length, wins, losses: v.trades.length - wins, pnl: v.realizedPnl, open: (p.positions || []).length });
+      }
     }
-    out.research = { bots, trades, pnl, positive };
+    rows.sort((a, b) => b.pnl - a.pnl);
+    out.research = { bots, trades, pnl, positive, since: since ? new Date(since).toISOString() : null, rows };
     res.json(out);
   }
   catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Main-bot running P&L for the dashboard chart. Cached until the trade log or the total changes.
+let pnlCache = null;
+app.get('/api/main-bot/pnl', (req, res) => {
+  try {
+    const S = require('./lib/main-bot-summary'), T = require('./lib/trade-log'), { ORDERBOOK_FILLS_SINCE } = require('./lib/fill-audit');
+    const stats = agent.state?.stats || {};
+    let key = `${stats.totalTrades}:${stats.totalPnL}`;
+    try { const st = fs.statSync(T.DEFAULT_FILE); key += `:${st.size}:${st.mtimeMs}`; } catch (_) { /* no log yet */ }
+    if (!pnlCache || pnlCache.key !== key) {
+      pnlCache = { key, value: { ...S.pnlSeries(T.load(), { totalPnl: Number(stats.totalPnL) || 0, totalTrades: Number(stats.totalTrades) || 0, cutover: Date.parse(ORDERBOOK_FILLS_SINCE) }), cutoverAt: ORDERBOOK_FILLS_SINCE } };
+    }
+    res.json(pnlCache.value);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/bot/status', (req, res) => {

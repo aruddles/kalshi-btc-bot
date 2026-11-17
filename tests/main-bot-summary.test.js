@@ -53,3 +53,30 @@ test('exit-vs-hold summary is cached until the log file changes', () => {
   assert.notEqual(c, a);
   assert.equal(c.exits, 321);
 });
+
+test('pnlSeries: offsets to the run total, marks the order-book cutover, de-duplicates', () => {
+  const t = (i, pnl, entry) => ({ orderId: `o${i}`, pnl, entryTime: entry, settleTime: entry + 60000 });
+  const trades = [t(1, 0.5, 1000), t(2, -2.5, 5000), t(3, 0.4, 9000), t(1, 0.5, 1000), { orderId: 'x' }];
+  const s = M.pnlSeries(trades, { totalPnl: 10, totalTrades: 13, cutover: 5000 });
+  assert.equal(s.unloggedTrades, 10);
+  assert.equal(s.points[0].n, 10);
+  assert.ok(Math.abs(s.points[0].pnl - 11.6) < 1e-9);         // 10 - (0.5 - 2.5 + 0.4)
+  assert.deepEqual(s.points.map(p => p.n), [10, 11, 12, 13]);
+  assert.equal(s.points[s.points.length - 1].pnl, 10);
+  assert.equal(s.cutoverTrade, 11);
+  const many = M.pnlSeries(Array.from({ length: 2000 }, (_, i) => t(i, 0.01, i)), { totalPnl: 20, totalTrades: 2000, maxPoints: 400 });
+  assert.ok(many.points.length <= 401);
+  assert.equal(many.points[many.points.length - 1].n, 2000);
+});
+
+test('markPosition: values an open position at the bid on its own side', () => {
+  const m = [{ ticker: 'T', yesBid: 0.6, noBid: 0.38, closeTime: 1000 + 90000 }];
+  const yes = M.markPosition({ ticker: 'T', side: 'yes', priceCents: 50, filledContracts: 4, totalCost: 2.1 }, m, 1000);
+  assert.equal(yes.bidCents, 60);
+  assert.ok(Math.abs(yes.unrealized - 0.3) < 1e-9);           // 4 x 0.60 - 2.10
+  assert.equal(yes.closesInSec, 90);
+  const no = M.markPosition({ ticker: 'T', side: 'no', priceCents: 45, contracts: 2, totalCost: 0.95 }, m, 1000);
+  assert.ok(Math.abs(no.unrealized - (-0.19)) < 1e-9);
+  const gone = M.markPosition({ ticker: 'Z', side: 'yes', priceCents: 50, contracts: 1, totalCost: 0.5 }, m, 1000);
+  assert.equal(gone.unrealized, null);
+});
